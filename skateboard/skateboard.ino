@@ -48,14 +48,14 @@ CRGB leds[NUM_LEDS];
 #define LED_BRIGHTNESS 96
 #define LED_FPS 120
 unsigned long prevLEDMillis = 0;
-int LEDdelay = 10;
+const int LEDdelay = 10;
 int ledPosition = 0; //current position in strip for pattern
-int ledState = 0;
+int ledState = 1;
 /*
--1 off
-0 initial or disconnect leds (chasing blue)
-1 rainbow
-2 follow throttle
+0 off
+1 initial or disconnect leds (chasing blue)
+2 rainbow
+3 follow throttle
 */
 
 //Radio pins/defs
@@ -164,9 +164,9 @@ void loop() {
           case 1: //1 is throttle update
             targetPPM = dataRx[1];
             break;
-          case 2: //2 is led update
-            if (dataRx[1] < 3) { //sanity check
-              if (dataRx[1] >= 0) {
+          case 2: //2 is led mode update
+            if (dataRx[1] <= 3) { //sanity check
+              if (dataRx[1] > 0) {
                 digitalWrite(RELAY_PIN0, LOW); //Enable leds
               } else {
                 digitalWrite(RELAY_PIN0, HIGH); //Disable leds
@@ -219,7 +219,7 @@ void loop() {
   if (currentMillis-prevLEDMillis>=LEDdelay && ledState > 0) { //make sure the leds are enabled
     prevLEDMillis = currentMillis;
     switch (ledState) {
-      case 0: //blue chase
+      case 1: //blue chase
         for (int i=0; i<NUM_LEDS; i++) {
           if (i == ledPosition) {
             leds[i] = CRGB::Blue;
@@ -232,10 +232,12 @@ void loop() {
           ledPosition = 0;
         }
         break;
-      case 1: //rainbow
-        fill_rainbow(leds, NUM_LEDS, CRGB::Black, 7);
+      case 2: //rainbow
+      //TODO MAKE RAINBOW FADE IN/OUT BASED ON THROTTLE
+      //https://github.com/marmilicious/FastLED_examples/blob/master/rainbow_brightness_and_saturation.ino
+        fill_rainbow(leds, NUM_LEDS, millis()/100, 7);
         break;
-      case 2: //color changes based on throttle (chaser again)
+      case 3: //color changes based on throttle (chaser again)
         int greenChannel = map(realPPM, ESC_MIN, ESC_MAX, 0, 255);
         int redChannel = map(ESC_MAX-realPPM, ESC_MIN, ESC_MAX, 0, 255);
         leds[ledPosition] = CRGB(redChannel, greenChannel, 0);
@@ -264,14 +266,15 @@ void transitionState(int newState) {
       digitalWrite(RELAY_PIN0, LOW); //enable the leds by default
       break;
     case 1:
-      if (ledState >= 0) { //enable/disable the leds based on what's going on
+      if (ledState > 0) { //enable/disable the leds based on what's going on
         digitalWrite(RELAY_PIN0, LOW);
       } else {
         digitalWrite(RELAY_PIN0, HIGH);
       }
     case 2: //uhoh we are going into remote disconnect mode
       Serial.println("Uhoh we've lost connection to the remote :(");
-      ledState = 0; //go back into disconnected mode
+      ledState = 1; //go back into disconnected mode
+      digitalWrite(RELAY_PIN0, LOW);
       targetPPM = ESC_STOP; //set target to 0 speed to bring us back down to 0 speed
       break;
   }  
