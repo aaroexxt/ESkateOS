@@ -48,7 +48,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 //TSL9521 Lux sensor
 Adafruit_TSL2561_Unified tsl = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT, 12345);
-#define LUX_ENABLE_THRESHOLD 200
+#define LUX_ENABLE_THRESHOLD 300
 
 //Joystick pins/setup
 #define JOYSTICK_X A1
@@ -112,7 +112,7 @@ void setup() {
     Serial.println("Lux sensor: failed :(");
     while(1){}
   }
-  tsl.enableAutoRange(true);
+  tsl.setGain(TSL2561_GAIN_16X); //enable high gain to retain good performance in the dark
   tsl.setIntegrationTime(TSL2561_INTEGRATIONTIME_13MS);
   Serial.println("Lux sensor: ok");
 
