@@ -1,17 +1,14 @@
 /***************
-
- ______     ______     __  __     ______     ______   ______        ______     ______     __   __     ______   ______     ______     __         __         ______     ______    
-/\  ___\   /\  ___\   /\ \/ /    /\  __ \   /\__  _\ /\  ___\      /\  ___\   /\  __ \   /\ "-.\ \   /\__  _\ /\  == \   /\  __ \   /\ \       /\ \       /\  ___\   /\  == \   
-\ \  __\   \ \___  \  \ \  _"-.  \ \  __ \  \/_/\ \/ \ \  __\      \ \ \____  \ \ \/\ \  \ \ \-.  \  \/_/\ \/ \ \  __<   \ \ \/\ \  \ \ \____  \ \ \____  \ \  __\   \ \  __<   
- \ \_____\  \/\_____\  \ \_\ \_\  \ \_\ \_\    \ \_\  \ \_____\     \ \_____\  \ \_____\  \ \_\\"\_\    \ \_\  \ \_\ \_\  \ \_____\  \ \_____\  \ \_____\  \ \_____\  \ \_\ \_\ 
-  \/_____/   \/_____/   \/_/\/_/   \/_/\/_/     \/_/   \/_____/      \/_____/   \/_____/   \/_/ \/_/     \/_/   \/_/ /_/   \/_____/   \/_____/   \/_____/   \/_____/   \/_/ /_/ 
-                                                                                                                                                                                
+ ______     ______     __  __     ______     ______   ______        ______     ______     ______     ______     _____    
+/\  ___\   /\  ___\   /\ \/ /    /\  __ \   /\__  _\ /\  ___\      /\  == \   /\  __ \   /\  __ \   /\  == \   /\  __-.  
+\ \  __\   \ \___  \  \ \  _"-.  \ \  __ \  \/_/\ \/ \ \  __\      \ \  __<   \ \ \/\ \  \ \  __ \  \ \  __<   \ \ \/\ \ 
+ \ \_____\  \/\_____\  \ \_\ \_\  \ \_\ \_\    \ \_\  \ \_____\     \ \_____\  \ \_____\  \ \_\ \_\  \ \_\ \_\  \ \____- 
+  \/_____/   \/_____/   \/_/\/_/   \/_/\/_/     \/_/   \/_____/      \/_____/   \/_____/   \/_/\/_/   \/_/ /_/   \/____/ 
+                                                                                                                                                                                 
 ****************
 
-
-  Heavily adapted from ElectroNoobs ESC Controller by Aaron Becker
-  EbikeOS by Aaron Becker. Let's get it
-  V1 May/Jun 2019, V2 Oct/Nov 2019
+  By Aaron Becker
+  V1 Nov/Dec 2019
 */
 
 #include <ServoTimer2.h>
@@ -36,6 +33,7 @@ ServoTimer2 ESC_RIGHT; //Create FSESC "servo" output
 #define ESC_STOP (ESC_MIN+ESC_MAX)/2;
 float realPPM = ESC_STOP;
 float targetPPM = ESC_STOP;
+unsigned long prevSpeedMillis = 0;
 
 //Relay pins
 #define RELAY_PIN0 9
@@ -49,10 +47,12 @@ float targetPPM = ESC_STOP;
 CRGB leds[NUM_LEDS];
 #define LED_BRIGHTNESS 96
 #define LED_FPS 120
-uint8_t gHue = 0; // rotating "base color"
+unsigned long prevLEDMillis = 0;
+int LEDdelay = 10;
 int ledPosition = 0; //current position in strip for pattern
 int ledState = 0;
 /*
+-1 off
 0 initial or disconnect leds (chasing blue)
 1 rainbow
 2 follow throttle
@@ -83,7 +83,13 @@ int MASTER_STATE = 0;
 void setup() {
   Serial.begin(57000);
   Serial.println("ESKATEINIT_setup begin");
-  delay(1000);
+  
+  //Setup relays and pins
+  pinMode(RELAY_PIN0, OUTPUT);
+  pinMode(RELAY_PIN1, OUTPUT);
+  digitalWrite(RELAY_PIN0, LOW); //enable leds
+  digitalWrite(RELAY_PIN1, HIGH); //disable second currently unused pin
+
   //Setup ESC
   ESC_LEFT.attach(ESC_L_PIN);
   ESC_RIGHT.attach(ESC_R_PIN);
@@ -96,7 +102,7 @@ void setup() {
   FastLED.setBrightness(LED_BRIGHTNESS);
   FastLED.clear();
   for (int i=0; i<NUM_LEDS; i++) {
-    leds[i] = CRGB:Black; //set all leds to be off
+    leds[i] = CRGB::Black; //set all leds to be off
   }
   FastLED.show();
   Serial.println("Setup leds: ok");
@@ -119,30 +125,22 @@ void setup() {
   radio.openReadingPipe(1, addresses[0]); //set address to recieve data
   radioRecieveMode();
   Serial.println("Setup radio: ok");
-
-
-
-  pinMode(potentiometer, INPUT);
-  ESC.attach(9);    
-  Serial.begin(9600);  
-  curval=0;
-  ESC.setMinimumPulse(800);
-  ESC.setMaximumPulse(2000);
 }
 
 void loop() {
   switch (MASTER_STATE) {
     case 0: //case 0 waiting for first hb signal from controller
       radioRecieveMode(); //ensure we're recieving
-      dataRx = {0, 0, 0};
+      resetDataRx();
       if (radio.available()) {
         radio.read(&dataRx, sizeof(dataRx));
         if (dataRx[0] == 200) { //200 is "heartbeat" signal
           Serial.println("Got first heartbeat signal from controller");
 
           radioTransmitMode();
-          dataTx = {200, 0, 0};
-          boolean ack = radio.send(&dataTx, sizeof(dataTx));
+          resetDataTx();
+          dataTx[0] = 200;
+          boolean ack = radio.write(&dataTx, sizeof(dataTx));
           if (ack) { //did transmission go through?
             Serial.println("hb ack first signal");
             prevHBMillis = millis();
@@ -154,23 +152,34 @@ void loop() {
     case 1: //standard operation
       radioRecieveMode();
       if (radio.available()) {
-        dataRx = {0, 0, 0};
+        resetDataRx();
         radio.read(&dataRx, sizeof(dataRx));
-        Serial.println("Got event #: "+dataRx[0]+", value1: "+dataRx[1]+", value2: "+dataRx[2]);
+        Serial.print("Got event #: ");
+        Serial.print(dataRx[0]);
+        Serial.print(", value1: ");
+        Serial.print(dataRx[1]);
+        Serial.print(", value2: ");
+        Serial.println(dataRx[2]);
         switch (dataRx[0]) {
           case 1: //1 is throttle update
             targetPPM = dataRx[1];
             break;
           case 2: //2 is led update
             if (dataRx[1] < 3) { //sanity check
+              if (dataRx[1] >= 0) {
+                digitalWrite(RELAY_PIN0, LOW); //Enable leds
+              } else {
+                digitalWrite(RELAY_PIN0, HIGH); //Disable leds
+              }
               ledState = dataRx[1];
             }
             break;
           case 200: //heartbeat. if we get one, we should send one
             Serial.println("controller hb recieved");
             radioTransmitMode();
-            dataTx = {200, 0, 0};
-            boolean ack = radio.send(&dataTx, sizeof(dataTx));
+            resetDataTx();
+            dataTx[0] = 200;
+            boolean ack = radio.write(&dataTx, sizeof(dataTx));
             if (!ack) {
               transitionState(2); //state 2 is when we fail to get or send a heartbeat signal from the controller
             } else {
@@ -182,15 +191,16 @@ void loop() {
       break;
       case 2: //lost connection case
         radioRecieveMode(); //ensure we're recieving
-        dataRx = {0, 0, 0};
+        resetDataRx();
         if (radio.available()) {
           radio.read(&dataRx, sizeof(dataRx));
           if (dataRx[0] == 200) { //200 is "heartbeat" signal
             Serial.println("Got heartbeat signal from controller after disconnection");
 
             radioTransmitMode();
-            dataTx = {200, 0, 0};
-            boolean ack = radio.send(&dataTx, sizeof(dataTx));
+            resetDataTx();
+            dataTx[0] = 200;
+            boolean ack = radio.write(&dataTx, sizeof(dataTx));
             if (ack) { //did transmission go through?
               Serial.println("hb ack reconnect");
               prevHBMillis = millis();
@@ -204,30 +214,40 @@ void loop() {
       transitionState(0);
   }
 
-  switch (ledState) {
-    case 0: //blue chase
-      for (int i=0; i<NUM_LEDS; i++) {
-        if (i == ledPosition) {
-          leds[i] = CRGB::Blue;
-        } else {
-          leds[i] = CRGB::Black;
+  unsigned long currentMillis = millis();
+  
+  if (currentMillis-prevLEDMillis>=LEDdelay && ledState > 0) { //make sure the leds are enabled
+    prevLEDMillis = currentMillis;
+    switch (ledState) {
+      case 0: //blue chase
+        for (int i=0; i<NUM_LEDS; i++) {
+          if (i == ledPosition) {
+            leds[i] = CRGB::Blue;
+          } else {
+            leds[i] = CRGB::Black;
+          }
         }
-      }
-      ledPosition++;
-      if (ledPosition > NUM_LEDS-1) {
-        ledPosition = 0;
-      }
-      break;
-    case 1: //rainbow
-      fill_rainbow(leds, NUM_LEDS, CRGB::Black, 7);
-      break;
-    case 2: //color changes based on throttle
-
-
+        ledPosition++;
+        if (ledPosition > NUM_LEDS-1) {
+          ledPosition = 0;
+        }
+        break;
+      case 1: //rainbow
+        fill_rainbow(leds, NUM_LEDS, CRGB::Black, 7);
+        break;
+      case 2: //color changes based on throttle (chaser again)
+        int greenChannel = map(realPPM, ESC_MIN, ESC_MAX, 0, 255);
+        int redChannel = map(ESC_MAX-realPPM, ESC_MIN, ESC_MAX, 0, 255);
+        leds[ledPosition] = CRGB(redChannel, greenChannel, 0);
+        ledPosition++;
+        if (ledPosition > NUM_LEDS-1) {
+          ledPosition = 0;
+        }
+        break;
+    }
   }
 
-  unsigned long currentMillis = millis();
-  if (currentMillis-prevHBMillis>=HBTimeoutMax) { //have we lost the controller
+  if (currentMillis-prevHBMillis>=HBTimeoutMax) { //have we lost connection with the controller? welp then we should prolly cut motors
     transitionState(2);
   }
 
@@ -235,57 +255,20 @@ void loop() {
 }
 
 
-  //Sensor update code
-  sensors_event_t event;
-  accel.getEvent(&event);
-  switch (ACCEL_AXIS) {
-    case 'x':
-      Serial.print("X: ");
-      Serial.print(event.acceleration.x);
-      break;
-    case 'y':
-      Serial.print("Y: ");
-      Serial.print(event.acceleration.y);
-      break;
-    case 'z':
-      Serial.print("Z: ");
-      Serial.print(event.acceleration.z);
-      break;
-  }
-  delay(500);
-
-
-
-
-  potval=analogRead(potentiometer);
-  potval=map(potval,0,1023,0,180);
-  
-  while(curval<potval){
-    potval=analogRead(potentiometer);
-    potval=map(potval,0,1023,0,180);
-    curval=curval+1;
-    ESC.write(curval);
-    SoftwareServo::refresh();
-    Serial.println(curval);
-    delay(50);}
-
-  while(curval>potval){
-    potval=analogRead(potentiometer);
-    potval=map(potval,0,1023,0,180);
-    curval=curval-1;
-    ESC.write(curval);
-    SoftwareServo::refresh();
-    Serial.println(curval);
-    delay(50);}
-
-    ESC.write(curval);
-    SoftwareServo::refresh();
-    Serial.println(curval);
-}
 
 void transitionState(int newState) {
   MASTER_STATE = newState;
+  Serial.println("New state: "+newState);
   switch (newState) {
+    case 0:
+      digitalWrite(RELAY_PIN0, LOW); //enable the leds by default
+      break;
+    case 1:
+      if (ledState >= 0) { //enable/disable the leds based on what's going on
+        digitalWrite(RELAY_PIN0, LOW);
+      } else {
+        digitalWrite(RELAY_PIN0, HIGH);
+      }
     case 2: //uhoh we are going into remote disconnect mode
       Serial.println("Uhoh we've lost connection to the remote :(");
       ledState = 0; //go back into disconnected mode
@@ -294,8 +277,38 @@ void transitionState(int newState) {
   }  
 }
 
-void updateESCPercent(float percent) {
-  if ()
+void updateESC() {
+  //Sensor update code (for now just print lol)
+  sensors_event_t event;
+  accel.getEvent(&event);
+  switch (ACCEL_AXIS) {
+    case 'x':
+      Serial.print("AX: ");
+      Serial.print(event.acceleration.x);
+      break;
+    case 'y':
+      Serial.print("AY: ");
+      Serial.print(event.acceleration.y);
+      break;
+    case 'z':
+      Serial.print("AZ: ");
+      Serial.print(event.acceleration.z);
+      break;
+  }
+
+  //TODO MAKE THIS BIG BRAIN WITH ACCELERATION DATA
+  unsigned long currentMillis = millis();
+  if (currentMillis-prevSpeedMillis > 50) {
+    prevSpeedMillis = currentMillis;
+    if (targetPPM > realPPM) { //we need to brake
+      realPPM -= 2; //brakes 2x as quick as accelerate
+    } else if (targetPPM < realPPM) {
+      realPPM += 1;
+    }
+  }
+  realPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits
+  ESC_LEFT.write(realPPM); //write the values
+  ESC_RIGHT.write(realPPM);
 }
 
 void radioRecieveMode() {
@@ -310,4 +323,16 @@ void radioTransmitMode() {
     radio.stopListening();
     radioListening = false;
   }
+}
+
+void resetDataRx() {
+  dataRx[0] = 0;
+  dataRx[1] = 0;
+  dataRx[2] = 0;
+}
+
+void resetDataTx() {
+  dataTx[0] = 0;
+  dataTx[1] = 0;
+  dataTx[2] = 0;
 }
