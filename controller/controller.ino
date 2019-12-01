@@ -82,7 +82,7 @@ int dataRx[3];
 int dataTx[3];
 unsigned long prevHBMillis = 0;
 const int HBInterval = 1000; //send a heartbeat every 1000ms
-boolean radioListening = true;
+boolean radioListening = false;
 
 void setup() {
   Serial.begin(9600);
@@ -128,7 +128,7 @@ void setup() {
     Serial.println("Radio: failed :(");
     while(1){}
   }
-  radio.setPALevel(RF24_PA_HIGH); //max because we don't want to lose connection
+  radio.setPALevel(RF24_PA_MAX); //max because we don't want to lose connection
   radio.setRetries(3,3); // delay, count
   //CONTROLLER Writes to addr 1, reads from addr 2
   radio.openWritingPipe(addresses[0]);
@@ -136,14 +136,7 @@ void setup() {
   radioTransmitMode();
   Serial.println("Setup radio: ok");
 
-  //Play a silly pitch
-  tone(9, 880); //A5 note
-  delay(200);
-  /*tone(9, 262); //C4 note
-  delay(200);*/
-  noTone(9);
-  delay(2000); //keep splash screen up for a bit
-
+  delay(1500); //keep splash screen up for a bit
   transitionState(0); //make sure to call transitionState to update screen
 }
 
@@ -156,14 +149,22 @@ void loop() {
         radio.read(&dataRx, sizeof(dataRx));
         if (dataRx[0] == 200) { //200 is "heartbeat" signal
           Serial.println("Got first heartbeat signal from board");
+                  //Play a silly pitch
+          tone(9, 880); //A5 note
+          delay(200);
+          /*tone(9, 262); //C4 note
+          delay(200);*/
+          noTone(9);
           transitionState(1);
         }
       }
+      break;
 
     case 1: //Normal operation
       //Update joystick
-      int curPos = map(analogRead(JOYSTICK_X), 0, 880, -100, (boostEnabled) ? 100 : THROTTLE_NONBOOST_MAX);
-      curPos = constrain(curPos, -100, 100); //make sure we have an actual value of curPos
+      int bMaxThrott = (boostEnabled) ? 100 : THROTTLE_NONBOOST_MAX;
+      int curPos = map(analogRead(JOYSTICK_X), 0, 880, -100, bMaxThrott);
+      curPos = constrain(curPos, -100, bMaxThrott); //make sure we have an actual value of curPos
       if (!throttleEnabled || abs(curPos) < 5) { //use deadzone of 5%
         curPos = 0; //just set it to 0 if it's not enabled
       }
@@ -235,6 +236,7 @@ void loop() {
           oldLedMode = ledMode;
         }
       }
+      break;
   }
 
   unsigned long currentMillis = millis();
@@ -243,6 +245,7 @@ void loop() {
     resetDataTx();
     dataTx[0] = 200;
     radio.write(&dataTx, sizeof(dataTx));
+    prevHBMillis = currentMillis;
   }
 }
 
@@ -255,7 +258,8 @@ void transitionState(int newState) {
       oled.clear();
       oled.set2X();
       oled.println("Waiting for");
-      oled.println("connection...");
+      oled.println("connection");
+      oled.println("...");
       break;
     case 1:
       oledUpdateDisplay();

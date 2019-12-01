@@ -71,7 +71,7 @@ int dataRx[3];
 int dataTx[3];
 unsigned long prevHBMillis = 0;
 const int HBTimeoutMax = 4000; //max time between signals before board cuts the motors
-boolean radioListening = true;
+boolean radioListening = false;
 
 //IMU pins/defs
 Adafruit_LSM303_Accel_Unified accel = Adafruit_LSM303_Accel_Unified(54321);
@@ -81,7 +81,7 @@ const char ACCEL_AXIS = 'x'; //axis that board accelerates along; used for accel
 int MASTER_STATE = 0;
 
 void setup() {
-  Serial.begin(57000);
+  Serial.begin(9600);
   Serial.println("ESKATEINIT_setup begin");
   
   //Setup relays and pins
@@ -108,13 +108,13 @@ void setup() {
   Serial.println("Setup leds: ok");
 
   //Setup accelerometer
-  if (!accel.begin()) {
-    Serial.println("Setup accel: fail. not detected :(");
-    while(1){}
-  }
-  accel.setRange(LSM303_RANGE_4G);
-  accel.setMode(LSM303_MODE_NORMAL);
-  Serial.println("Setup accel: ok");
+  // if (!accel.begin()) {
+  //   Serial.println("Setup accel: fail. not detected :(");
+  //   while(1){}
+  // }
+  // accel.setRange(LSM303_RANGE_4G);
+  // accel.setMode(LSM303_MODE_NORMAL);
+  // Serial.println("Setup accel: ok");
 
   //Setup radio
   radio.begin();
@@ -125,6 +125,8 @@ void setup() {
   radio.openReadingPipe(1, addresses[0]); //set address to recieve data
   radioRecieveMode();
   Serial.println("Setup radio: ok");
+
+  transitionState(0);
 }
 
 void loop() {
@@ -135,31 +137,31 @@ void loop() {
       if (radio.available()) {
         radio.read(&dataRx, sizeof(dataRx));
         if (dataRx[0] == 200) { //200 is "heartbeat" signal
-          Serial.println("Got first heartbeat signal from controller");
+          Serial.println("Got first heartbeat signal from controller; we're go");
 
           radioTransmitMode();
           resetDataTx();
           dataTx[0] = 200;
-          boolean ack = radio.write(&dataTx, sizeof(dataTx));
-          if (ack) { //did transmission go through?
-            Serial.println("hb ack first signal");
-            prevHBMillis = millis();
-            transitionState(1);
-          }
+          radio.write(&dataTx, sizeof(dataTx)); //send one back
 
+          prevHBMillis = millis();
+          transitionState(1);
         }
       }
+      break;
     case 1: //standard operation
       radioRecieveMode();
       if (radio.available()) {
         resetDataRx();
         radio.read(&dataRx, sizeof(dataRx));
-        Serial.print("Got event #: ");
-        Serial.print(dataRx[0]);
-        Serial.print(", value1: ");
-        Serial.print(dataRx[1]);
-        Serial.print(", value2: ");
-        Serial.println(dataRx[2]);
+        if (dataRx[0] != 200) {
+          Serial.print("Got event #: ");
+          Serial.print(dataRx[0]);
+          Serial.print(", value1: ");
+          Serial.print(dataRx[1]);
+          Serial.print(", value2: ");
+          Serial.println(dataRx[2]);
+        }
         switch (dataRx[0]) {
           case 1: //1 is throttle update
             targetPPM = dataRx[1];
@@ -175,40 +177,35 @@ void loop() {
             }
             break;
           case 200: //heartbeat. if we get one, we should send one
-            Serial.println("controller hb recieved");
+            // Serial.println("controller hb recieved");
             radioTransmitMode();
             resetDataTx();
             dataTx[0] = 200;
-            boolean ack = radio.write(&dataTx, sizeof(dataTx));
-            if (!ack) {
-              transitionState(2); //state 2 is when we fail to get or send a heartbeat signal from the controller
-            } else {
-              prevHBMillis = millis();
-            }
+            radio.write(&dataTx, sizeof(dataTx));
+
+            prevHBMillis = millis();
             break;
         }
       }
       break;
-      case 2: //lost connection case
-        radioRecieveMode(); //ensure we're recieving
-        resetDataRx();
-        if (radio.available()) {
-          radio.read(&dataRx, sizeof(dataRx));
-          if (dataRx[0] == 200) { //200 is "heartbeat" signal
-            Serial.println("Got heartbeat signal from controller after disconnection");
+    case 2: //lost connection case
+      radioRecieveMode(); //ensure we're recieving
+      resetDataRx();
+      if (radio.available()) {
+        radio.read(&dataRx, sizeof(dataRx));
+        if (dataRx[0] == 200) { //200 is "heartbeat" signal
+          Serial.println("Got heartbeat signal from controller after disconnection");
 
-            radioTransmitMode();
-            resetDataTx();
-            dataTx[0] = 200;
-            boolean ack = radio.write(&dataTx, sizeof(dataTx));
-            if (ack) { //did transmission go through?
-              Serial.println("hb ack reconnect");
-              prevHBMillis = millis();
-              transitionState(1); //go back to normal operation
-            }
-          }
+          radioTransmitMode();
+          resetDataTx();
+          dataTx[0] = 200;
+          radio.write(&dataTx, sizeof(dataTx));
+          
+          prevHBMillis = millis();
+          transitionState(1); //go back to normal operation
         }
-        break;
+      }
+      break;
     default:
       Serial.println("Undefined state; resetting");
       transitionState(0);
@@ -249,7 +246,7 @@ void loop() {
     }
   }
 
-  if (currentMillis-prevHBMillis>=HBTimeoutMax) { //have we lost connection with the controller? welp then we should prolly cut motors
+  if (currentMillis-prevHBMillis>=HBTimeoutMax && MASTER_STATE == 1) { //have we lost connection with the controller while operating normally? welp then we should prolly cut motors
     transitionState(2);
   }
 
@@ -260,7 +257,8 @@ void loop() {
 
 void transitionState(int newState) {
   MASTER_STATE = newState;
-  Serial.println("New state: "+newState);
+  Serial.print("New state: ");
+  Serial.println(newState);
   switch (newState) {
     case 0:
       digitalWrite(RELAY_PIN0, LOW); //enable the leds by default
@@ -271,6 +269,7 @@ void transitionState(int newState) {
       } else {
         digitalWrite(RELAY_PIN0, HIGH);
       }
+      break;
     case 2: //uhoh we are going into remote disconnect mode
       Serial.println("Uhoh we've lost connection to the remote :(");
       ledState = 1; //go back into disconnected mode
@@ -282,22 +281,22 @@ void transitionState(int newState) {
 
 void updateESC() {
   //Sensor update code (for now just print lol)
-  sensors_event_t event;
-  accel.getEvent(&event);
-  switch (ACCEL_AXIS) {
-    case 'x':
-      Serial.print("AX: ");
-      Serial.print(event.acceleration.x);
-      break;
-    case 'y':
-      Serial.print("AY: ");
-      Serial.print(event.acceleration.y);
-      break;
-    case 'z':
-      Serial.print("AZ: ");
-      Serial.print(event.acceleration.z);
-      break;
-  }
+  // sensors_event_t event;
+  // accel.getEvent(&event);
+  // switch (ACCEL_AXIS) {
+  //   case 'x':
+  //     Serial.print("AX: ");
+  //     Serial.print(event.acceleration.x);
+  //     break;
+  //   case 'y':
+  //     Serial.print("AY: ");
+  //     Serial.print(event.acceleration.y);
+  //     break;
+  //   case 'z':
+  //     Serial.print("AZ: ");
+  //     Serial.print(event.acceleration.z);
+  //     break;
+  // }
 
   //TODO MAKE THIS BIG BRAIN WITH ACCELERATION DATA
   unsigned long currentMillis = millis();
