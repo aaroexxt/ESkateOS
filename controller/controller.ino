@@ -28,6 +28,7 @@ int MASTER_STATE = 0;
 boolean throttleEnabled = false;
 boolean boostEnabled = false;
 boolean oldBoostEnabled = false;
+boolean updateDisplay = false;
 int ledMode = -1;
 int oldLedMode = -1;
 
@@ -46,6 +47,8 @@ int oldLedMode = -1;
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 SSD1306AsciiWire oled;
+unsigned long prevDispUpdateMillis = 0;
+int dispMinUpdate = 200; //minimum time between display updates in ms to make sure we don't update faster than what the screen can handle
 
 //TSL9521 Lux sensor
 Adafruit_TSL2561_Unified tsl = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT, 12345);
@@ -172,7 +175,7 @@ void loop() {
         int ppm = map(curPos, -100, 100, ESC_MIN, ESC_MAX);
         //Update display
         if (abs(curPos-joystickPrevPos) > 3) { //because display updates are kinda annoying, try to prevent as many as we can
-          oledUpdateDisplay();
+          updateDisplay = true; //set display update flag for next timer cycle
           Serial.print("JoyChgState:");
           Serial.println(curPos);
         }
@@ -202,7 +205,7 @@ void loop() {
 
       boostEnabled = !digitalRead(BOOST_SW);
       if (boostEnabled != oldBoostEnabled) {
-        oledUpdateDisplay();
+        updateDisplay = true; //set display update flag for next timer cycle
         Serial.print("BoostChgState:");
         Serial.println(boostEnabled);
         //No need to send - handled on the controller only
@@ -222,7 +225,7 @@ void loop() {
 
         if (oldLedMode != ledMode) {
           //Update display
-          oledUpdateDisplay();
+          updateDisplay = true; //set display update flag for next timer cycle
           Serial.print("LEDChgState:");
           Serial.println(ledMode);
 
@@ -246,6 +249,13 @@ void loop() {
     dataTx[0] = 200;
     radio.write(&dataTx, sizeof(dataTx));
     prevHBMillis = currentMillis;
+  }
+
+  if (currentMillis-prevDispUpdateMillis >= dispMinUpdate && updateDisplay) {
+    updateDisplay = false;
+    prevDispUpdateMillis = currentMillis;
+    
+    oledUpdateDisplay();
   }
 }
 
@@ -278,9 +288,9 @@ void oledUpdateDisplay() {
   oled.println((ledMode == 2) ? "Rainbow" : (ledMode == 3) ? "ChgThrott" : "Off");
   oled.set2X();
   oled.println("________________");
-  oled.print(joystickPrevPos);
+  oled.print(joystickPrevPos); //'recent enough' ig it's ok
   oled.println("%");
-
+}
 
 //Old display update code:
   /*
@@ -313,7 +323,6 @@ void oledUpdateDisplay() {
   display.setTextSize(24);
   display.println(curY+"%");
   display.display();*/
-}
 
 void radioRecieveMode() {
   if (!radioListening) { //if we're not listening
