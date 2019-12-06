@@ -43,12 +43,14 @@ unsigned long prevSpeedMillis = 0;
 #define LED_DATA_PIN    3
 #define LED_TYPE    WS2811
 #define COLOR_ORDER GRB
-#define NUM_LEDS    64
+#define NUM_LEDS    30
 CRGB leds[NUM_LEDS];
 #define LED_BRIGHTNESS 96
 #define LED_FPS 120
 unsigned long prevLEDMillis = 0;
-const int LEDdelay = 10;
+const int LEDdelayShort = 10;
+const int LEDdelayLong = 100;
+int LEDdelay = LEDdelayLong;
 int ledPosition = 0; //current position in strip for pattern
 int ledState = 1;
 /*
@@ -70,7 +72,7 @@ Third int is value 2 (so you can send up to four bytes of data if you want)
 int dataRx[3];
 int dataTx[3];
 unsigned long prevHBMillis = 0;
-const int HBTimeoutMax = 4000; //max time between signals before board cuts the motors
+const int HBTimeoutMax = 1500; //max time between signals before board cuts the motors
 boolean radioListening = false;
 
 //IMU pins/defs
@@ -138,6 +140,7 @@ void loop() {
         radio.read(&dataRx, sizeof(dataRx));
         if (dataRx[0] == 200) { //200 is "heartbeat" signal
           Serial.println("Got first heartbeat signal from controller; we're go");
+          ledState = 0; //Make sure LEDs are off
 
           radioTransmitMode();
           resetDataTx();
@@ -172,6 +175,8 @@ void loop() {
                 digitalWrite(RELAY_PIN0, LOW); //Enable leds
               } else {
                 digitalWrite(RELAY_PIN0, HIGH); //Disable leds
+                FastLED.clear();
+                FastLED.show();
               }
               ledState = dataRx[1];
             }
@@ -195,6 +200,7 @@ void loop() {
         radio.read(&dataRx, sizeof(dataRx));
         if (dataRx[0] == 200) { //200 is "heartbeat" signal
           Serial.println("Got heartbeat signal from controller after disconnection");
+          ledState = 0; //Make sure LEDs are off
 
           radioTransmitMode();
           resetDataTx();
@@ -217,31 +223,37 @@ void loop() {
     prevLEDMillis = currentMillis;
     switch (ledState) {
       case 1: //blue chase
+        LEDdelay = LEDdelayLong;
         for (int i=0; i<NUM_LEDS; i++) {
-          if (i == ledPosition) {
-            leds[i] = CRGB::Blue;
+          if ((i+ledPosition)%5 == 0) {
+            leds[i] = CRGB::Green;
           } else {
             leds[i] = CRGB::Black;
           }
         }
         ledPosition++;
-        if (ledPosition > NUM_LEDS-1) {
+        if (ledPosition > 4) {
           ledPosition = 0;
         }
+        FastLED.show();
         break;
       case 2: //rainbow
+        LEDdelay = LEDdelayShort;
       //TODO MAKE RAINBOW FADE IN/OUT BASED ON THROTTLE
       //https://github.com/marmilicious/FastLED_examples/blob/master/rainbow_brightness_and_saturation.ino
-        fill_rainbow(leds, NUM_LEDS, millis()/100, 7);
+        fill_rainbow(leds, NUM_LEDS, millis()/10, 7);
+        FastLED.show();
         break;
       case 3: //color changes based on throttle (chaser again)
-        int greenChannel = map(realPPM, ESC_MIN, ESC_MAX, 0, 255);
-        int redChannel = map(ESC_MAX-realPPM, ESC_MIN, ESC_MAX, 0, 255);
-        leds[ledPosition] = CRGB(redChannel, greenChannel, 0);
+        LEDdelay = LEDdelayShort;
+        int greenChannel = map(targetPPM, ESC_MIN, ESC_MAX, 0, 255);
+        int redChannel = map(ESC_MAX-targetPPM, ESC_MIN, ESC_MAX, 0, 255);
+        leds[ledPosition] = CRGB(redChannel, 0, greenChannel);
         ledPosition++;
         if (ledPosition > NUM_LEDS-1) {
           ledPosition = 0;
         }
+        FastLED.show();
         break;
     }
   }
@@ -268,6 +280,8 @@ void transitionState(int newState) {
         digitalWrite(RELAY_PIN0, LOW);
       } else {
         digitalWrite(RELAY_PIN0, HIGH);
+        FastLED.clear();
+        FastLED.show();
       }
       break;
     case 2: //uhoh we are going into remote disconnect mode
