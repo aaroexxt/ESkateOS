@@ -30,7 +30,7 @@ ServoTimer2 ESC_RIGHT; //Create FSESC "servo" output
 
 #define ESC_MIN 800
 #define ESC_MAX 2000
-#define ESC_STOP (ESC_MIN+ESC_MAX)/2;
+#define ESC_STOP 1600 //(ESC_MIN+ESC_MAX)/2;
 float realPPM = ESC_STOP;
 float targetPPM = ESC_STOP;
 unsigned long prevSpeedMillis = 0;
@@ -72,7 +72,7 @@ Third int is value 2 (so you can send up to four bytes of data if you want)
 int dataRx[3];
 int dataTx[3];
 unsigned long prevHBMillis = 0;
-const int HBTimeoutMax = 1500; //max time between signals before board cuts the motors
+const int HBTimeoutMax = 3000; //max time between signals before board cuts the motors
 boolean radioListening = false;
 
 //IMU pins/defs
@@ -110,13 +110,13 @@ void setup() {
   Serial.println("Setup leds: ok");
 
   //Setup accelerometer
-  // if (!accel.begin()) {
-  //   Serial.println("Setup accel: fail. not detected :(");
-  //   while(1){}
-  // }
-  // accel.setRange(LSM303_RANGE_4G);
-  // accel.setMode(LSM303_MODE_NORMAL);
-  // Serial.println("Setup accel: ok");
+  if (!accel.begin()) {
+    Serial.println("Setup accel: fail. not detected :(");
+    while(1){}
+  }
+  accel.setRange(LSM303_RANGE_4G);
+  accel.setMode(LSM303_MODE_NORMAL);
+  Serial.println("Setup accel: ok");
 
   //Setup radio
   radio.begin();
@@ -295,33 +295,42 @@ void transitionState(int newState) {
 
 void updateESC() {
   //Sensor update code (for now just print lol)
-  // sensors_event_t event;
-  // accel.getEvent(&event);
-  // switch (ACCEL_AXIS) {
-  //   case 'x':
-  //     Serial.print("AX: ");
-  //     Serial.print(event.acceleration.x);
-  //     break;
-  //   case 'y':
-  //     Serial.print("AY: ");
-  //     Serial.print(event.acceleration.y);
-  //     break;
-  //   case 'z':
-  //     Serial.print("AZ: ");
-  //     Serial.print(event.acceleration.z);
-  //     break;
-  // }
+  sensors_event_t event;
+  accel.getEvent(&event);
+  if (event.acceleration.x > 5) {
+    switch (ACCEL_AXIS) {
+      case 'x':
+        Serial.print("AX: ");
+        Serial.println(event.acceleration.x);
+        break;
+      case 'y':
+        Serial.print("AY: ");
+        Serial.println(event.acceleration.y);
+        break;
+      case 'z':
+        Serial.print("AZ: ");
+        Serial.println(event.acceleration.z);
+        break;
+    }
+  }
 
   //TODO MAKE THIS BIG BRAIN WITH ACCELERATION DATA
   unsigned long currentMillis = millis();
   if (currentMillis-prevSpeedMillis > 50) {
     prevSpeedMillis = currentMillis;
-    if (targetPPM > realPPM) { //we need to brake
-      realPPM -= 2; //brakes 2x as quick as accelerate
-    } else if (targetPPM < realPPM) {
-      realPPM += 1;
+    
+    if (targetPPM > realPPM) { //we need to go
+      realPPM += (targetPPM-realPPM)/20;
+    } else if (targetPPM < realPPM) { //brake faster!
+      realPPM += (targetPPM-realPPM)/10;
+    }
+
+    if (abs(targetPPM-ESC_STOP) < 100 || targetPPM == 1400) { //deadband of 100ppm AND catch joystick code not being updated
+      targetPPM = ESC_STOP;
     }
   }
+  Serial.print("Rppm: ");
+  Serial.println(realPPM);
   realPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits
   ESC_LEFT.write(realPPM); //write the values
   ESC_RIGHT.write(realPPM);
