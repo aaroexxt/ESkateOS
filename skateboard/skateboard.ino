@@ -45,7 +45,7 @@ unsigned long prevSpeedMillis = 0;
 #define COLOR_ORDER GRB
 #define NUM_LEDS    30
 CRGB leds[NUM_LEDS];
-#define LED_BRIGHTNESS 96
+#define LED_BRIGHTNESS 128
 #define LED_FPS 120
 unsigned long prevLEDMillis = 0;
 const int LEDdelayShort = 10;
@@ -157,14 +157,14 @@ void loop() {
       if (radio.available()) {
         resetDataRx();
         radio.read(&dataRx, sizeof(dataRx));
-        if (dataRx[0] != 200) {
+        /*if (dataRx[0] != 200) {
           Serial.print("Got event #: ");
           Serial.print(dataRx[0]);
           Serial.print(", value1: ");
           Serial.print(dataRx[1]);
           Serial.print(", value2: ");
           Serial.println(dataRx[2]);
-        }
+        }*/
         switch (dataRx[0]) {
           case 1: //1 is throttle update
             targetPPM = dataRx[1];
@@ -329,8 +329,6 @@ void updateESC() {
       targetPPM = ESC_STOP;
     }
   }
-  Serial.print("Rppm: ");
-  Serial.println(realPPM);
   realPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits
   ESC_LEFT.write(realPPM); //write the values
   ESC_RIGHT.write(realPPM);
