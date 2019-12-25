@@ -8,7 +8,7 @@
 ****************
 
   By Aaron Becker
-  V1 Nov/Dec 2019
+  V2 Dec 2019/Jan 2020
 */
 
 #include <nRF24L01.h>
@@ -17,8 +17,6 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_TSL2561_U.h> //light sensor
 
-#include "joystickHelper.h" //joystick library
-
 #include <SPI.h>
 #include <Wire.h>
 #include "SSD1306Ascii.h" //Thank god for Bill Greiman who came up with a library that uses less memory
@@ -26,6 +24,7 @@
 
 int MASTER_STATE = 0;
 boolean throttleEnabled = false;
+boolean oldThrottleEnabled = false;
 boolean boostEnabled = false;
 boolean oldBoostEnabled = false;
 boolean updateDisplay = false;
@@ -42,6 +41,8 @@ int oldLedMode = -1;
 
 //Buzzer
 #define BUZZER_PIN 9
+unsigned long toneExpire = 0;
+boolean toneActive = false;
 
 //OLED
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -52,14 +53,17 @@ int dispMinUpdate = 200; //minimum time between display updates in ms to make su
 
 //TSL9521 Lux sensor
 Adafruit_TSL2561_Unified tsl = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT, 12345);
-#define LUX_ENABLE_THRESHOLD 7
+#define LUX_ENABLE_THRESHOLD 20
+int oldLux = -1;
+unsigned long prevLuxUpdateMillis = 0;
+int luxMinUpdate = 200;
 
 //Joystick pins/setup
 #define JOYSTICK_X A1
 #define JOYSTICK_Y A2
 #define JOYSTICK_SW 6
-joystickHelper joystick(JOYSTICK_X, JOYSTICK_Y, JOYSTICK_SW);
 int joystickPrevPos = 0;
+unsigned long lastJoySWDebounceTime = 0;
 
 //Batt pins
 #define VBATT A0
@@ -81,10 +85,42 @@ First int is command number
 Second int is value 1
 Third int is value 2 (so you can send up to four bytes of data if you want)
 */
+
+/* RADIO COMMANDS MASTER
+ID 200: heartbeat. Data: [0, 0]
+ID 1: ThrottleVal update. Data: [raw value, 0]
+ID 2: ThrottleSW update. Data: [sw, 0]
+ID 3: LED mode update. Data: [ledMode (0, 1, 2), 0]
+ID 4: BOOST switch update. Data: [boostMode (0, 1), 0]
+ID 5: lux sensor update. Data: [luxVal, passingEnableThreshold (0, 1)]
+
+ID 10: Ask controller to send state of all peripherals
+ID 11: Controller force screen update
+ID 12: VESC data (rpm, etc)
+ID 13: Play tone
+*/
+
+typedef enum {
+  HEARTBEAT = 200,
+
+  //Controller -> Board
+  THROTTLE_VAL = 1,
+  THROTTLE_SW = 2,
+  LEDMODE = 3,
+  BOOSTMODE = 4,
+  LUX_VAL = 5,
+
+  //Board -> Controller
+  SENDALLDATA = 10,
+  SCREENUPDATE = 11,
+  VESCDATA = 12,
+  TONE = 13
+} RADIO_COMMANDS;
+
 int dataRx[3];
 int dataTx[3];
 unsigned long prevHBMillis = 0;
-const int HBInterval = 1000; //send a heartbeat every 1000ms
+const int HBInterval = 250; //send a heartbeat every 250ms, 4x per second
 boolean radioListening = false;
 
 void setup() {
@@ -144,6 +180,8 @@ void setup() {
 }
 
 void loop() {
+  unsigned long currentMillis = millis(); //store millis value (current value) for reference
+
   switch (MASTER_STATE) {
     case 0: //0 is waiting for board response because hb signals are being sent constantly
       radioRecieveMode();
@@ -152,12 +190,8 @@ void loop() {
         radio.read(&dataRx, sizeof(dataRx));
         if (dataRx[0] == 200) { //200 is "heartbeat" signal
           Serial.println("Got first heartbeat signal from board");
-                  //Play a silly pitch
-          tone(9, 880); //A5 note
-          delay(200);
-          /*tone(9, 262); //C4 note
-          delay(200);*/
-          noTone(9);
+          //Play a silly pitch
+          asynchTone(880, 200); //tone, time
           transitionState(1);
         }
       }
@@ -165,16 +199,13 @@ void loop() {
 
     case 1: //Normal operation
       //Update joystick
-      int bMaxThrott = (boostEnabled) ? 100 : THROTTLE_NONBOOST_MAX;
-      int curPos = map(analogRead(JOYSTICK_X), 0, 880, -100, bMaxThrott);
-      curPos = constrain(curPos, -100, bMaxThrott); //make sure we have an actual value of curPos
+      int curPos = analogRead(JOYSTICK_X);
       if (!throttleEnabled || abs(curPos) < 5) { //use deadzone of 5%
-        curPos = 0; //just set it to 0 if it's not enabled
+        curPos = 0; //just set it to 0 if it's not enabled or within deadzone
       }
       if (curPos != joystickPrevPos) {
-        int ppm = map(curPos, -100, 100, ESC_MIN, ESC_MAX);
         //Update display
-        if (abs(curPos-joystickPrevPos) > 3) { //because display updates are kinda annoying, try to prevent as many as we can
+        if (abs(curPos-joystickPrevPos) > 3) { //because display updates are kinda annoying, try to prevent as many as we can. make sure difference is at least 3%
           updateDisplay = true; //set display update flag for next timer cycle
           Serial.print("JoyChgState:");
           Serial.println(curPos);
@@ -183,8 +214,8 @@ void loop() {
         //Send position to board
         radioTransmitMode();
         resetDataTx();
-        dataTx[0] = 1; //led update
-        dataTx[1] = ppm;
+        dataTx[0] = THROTTLE_VAL; //throttle update
+        dataTx[1] = curPos;
         radio.write(&dataTx, sizeof(dataTx));
 
         joystickPrevPos = curPos;
@@ -194,26 +225,60 @@ void loop() {
       sensors_event_t event;
       tsl.getEvent(&event);
       if (event.light) { //make sure sensor isn't overloaded
-        if (event.light < LUX_ENABLE_THRESHOLD) { //cool finger is covering sensor, let's go!
-          throttleEnabled = true;
-          // Serial.println("ThrottleEnable");
-        } else {
-          throttleEnabled = false;
-          // Serial.println("ThrottleDisable");
+        if (oldLux != event.light && (currentMillis - prevLuxUpdateMillis) > luxMinUpdate) { //send lux to board if min time has elapsed
+          radioTransmitMode();
+          resetDataTx();
+          dataTx[0] = LUX_VAL; //lux update
+          dataTx[1] = event.light;
+          dataTx[2] = (event.light < LUX_ENABLE_THRESHOLD) ? 1 : 0;
+          radio.write(&dataTx, sizeof(dataTx));
+
+          prevLuxUpdateMillis = currentMillis;
+          oldLux = event.light;
         }
       }
 
-      boostEnabled = !digitalRead(BOOST_SW);
-      if (boostEnabled != oldBoostEnabled) {
-        updateDisplay = true; //set display update flag for next timer cycle
-        Serial.print("BoostChgState:");
-        Serial.println(boostEnabled);
-        //No need to send - handled on the controller only
+      throttleEnabled = !digitalRead(JOYSTICK_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
+      if (throttleEnabled != oldThrottleEnabled) {
+        lastJoySWDebounceTime = currentMillis;
+      }
+      if ((currentMillis - lastJoySWDebounceTime) > debounceDelay) { //give it time to settle
+        if (throttleEnabled != oldThrottleEnabled) { //Ensure it's still actually different
+          updateDisplay = true; //set display update flag for next timer cycle
+          Serial.print("ThrottleSWState:");
+          Serial.println(throttleEnabled);
+          
+          //Now send the data since there's been an update
+          radioTransmitMode();
+          resetDataTx();
+          dataTx[0] = THROTTLE_SW; //sw update
+          dataTx[1] = (throttleEnabled) ? 1 : 0;
+          radio.write(&dataTx, sizeof(dataTx));
 
-        oldBoostEnabled = boostEnabled;
+          oldThrottleEnabled = throttleEnabled;
+        }
       }
 
-      unsigned long currentMillis = millis(); //this switch needs debouncing
+      boostEnabled = !digitalRead(BOOST_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
+      if (boostEnabled != oldBoostEnabled) {
+        lastBoostDebounceTime = currentMillis;
+      }
+      if ((currentMillis - lastBoostDebounceTime) > debounceDelay) { //give it time to settle
+        if (boostEnabled != oldBoostEnabled) { //Ensure it's still actually different
+          updateDisplay = true; //set display update flag for next timer cycle
+          Serial.print("BoostChgState:");
+          Serial.println(boostEnabled);
+          
+          //Now send the data since there's been an update
+          radioTransmitMode();
+          resetDataTx();
+          dataTx[0] = BOOSTMODE; //boost update
+          dataTx[1] = (boostEnabled) ? 1 : 0;
+          radio.write(&dataTx, sizeof(dataTx));
+
+          oldBoostEnabled = boostEnabled;
+        }
+      }
 
       int LEDReading1 = !digitalRead(LED_1_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
       int LEDReading2 = !digitalRead(LED_2_SW);
@@ -232,7 +297,7 @@ void loop() {
           //Now send the data since there's been an update
           radioTransmitMode();
           resetDataTx();
-          dataTx[0] = 2; //led update
+          dataTx[0] = LEDMODE; //led update
           dataTx[1] = ledMode;
           radio.write(&dataTx, sizeof(dataTx));
 
@@ -242,21 +307,78 @@ void loop() {
       break;
   }
 
-  unsigned long currentMillis = millis();
   if (currentMillis-prevHBMillis >= HBInterval) { //every HBInterval ms send a new heartbeat to board
     radioTransmitMode();
     resetDataTx();
-    dataTx[0] = 200;
+    dataTx[0] = HEARTBEAT;
     radio.write(&dataTx, sizeof(dataTx));
     prevHBMillis = currentMillis;
   }
 
+  radioRecieveMode(); //Check for any data from the 
+  if (radio.available()) {
+    resetDataRx();
+    radio.read(&dataRx, sizeof(dataRx));
+    switch (dataRx[0]) {
+      case SENDALLDATA:
+        radioTransmitMode();
+        resetDataTx();
+        dataTx[0] = HEARTBEAT;
+        radio.write(&dataTx, sizeof(dataTx));
+        resetDataTx();
+        dataTx[0] = LEDMODE; //led update
+        dataTx[1] = ledMode;
+        radio.write(&dataTx, sizeof(dataTx));
+        resetDataTx();
+        dataTx[0] = BOOSTMODE; //boost update
+        dataTx[1] = (boostEnabled) ? 1 : 0;
+        radio.write(&dataTx, sizeof(dataTx));
+        resetDataTx();
+        dataTx[0] = THROTTLE_SW; //sw update
+        dataTx[1] = (throttleEnabled) ? 1 : 0;
+        radio.write(&dataTx, sizeof(dataTx));
+        resetDataTx();
+        dataTx[0] = LUX_VAL; //lux update
+        dataTx[1] = oldLux;
+        dataTx[2] = (oldLux < LUX_ENABLE_THRESHOLD);
+        radio.write(&dataTx, sizeof(dataTx));
+        resetDataTx();
+        dataTx[0] = THROTTLE_VAL; //throttle update
+        dataTx[1] = joystickPrevPos;
+        radio.write(&dataTx, sizeof(dataTx));
+        break;
+      case SCREENUPDATE:
+        updateDisplay = true; //set flag so as not to refresh too fast
+        break;
+      case VESCDATA:
+        //TODO THIS
+        break;
+      case TONE:
+        asynchTone(dataRx[1], dataRx[2]); //Tone, time
+        break;
+
+    }
+  }
+
+  //Perform display update if enough time has elapsed
   if (currentMillis-prevDispUpdateMillis >= dispMinUpdate && updateDisplay) {
     updateDisplay = false;
     prevDispUpdateMillis = currentMillis;
     
     oledUpdateDisplay();
   }
+
+  //End tone if it's expired
+  if (currentMillis > toneExpire && toneActive) {
+    noTone(BUZZER_PIN);
+    toneActive = false;
+  }
+}
+
+void asynchTone(int pitch, int time) { //time in ms
+  tone(BUZZER_PIN, pitch); //A5 note
+  toneExpire = millis()+time;
+  toneActive = true;
 }
 
 void transitionState(int newState) {

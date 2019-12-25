@@ -8,7 +8,7 @@
 ****************
 
   By Aaron Becker
-  V1 Nov/Dec 2019
+  V2 Dec 2019/Jan 2020
 */
 
 #include <ServoTimer2.h>
@@ -22,18 +22,40 @@
 
 //PIN DEFS
 
-//Esc pins
+//ESC pins
 ServoTimer2 ESC_LEFT; //Create FSESC "servo" output
 ServoTimer2 ESC_RIGHT; //Create FSESC "servo" output
 #define ESC_R_PIN 5
 #define ESC_L_PIN 6
 
 #define ESC_MIN 800
+#define ESC_NONBOOST_MAX 1700
 #define ESC_MAX 2000
-#define ESC_STOP 1600 //(ESC_MIN+ESC_MAX)/2;
-float realPPM = ESC_STOP;
-float targetPPM = ESC_STOP;
+#define ESC_STOP 1400 //(ESC_MIN+ESC_MAX)/2;
+
+#define JOY_MIN 0
+#define JOY_MAX 880
+int realPPM = ESC_STOP;
+int targetPPM = ESC_STOP;
+int realRAW = 0;
 unsigned long prevSpeedMillis = 0;
+boolean throttleEnabled = false;
+boolean boostEnabled = false;
+
+
+struct vescMeasure {
+  //7 Values int16_t not read(14 byte)
+  float avgMotorCurrent;
+  float avgInputCurrent;
+  float dutyCycleNow;
+  long rpm;
+  float inpVoltage;
+  float ampHours;
+  float ampHoursCharged;
+  //2 values int32_t not read (8 byte)
+  long tachometer;
+  long tachometerAbs;
+};
 
 //Relay pins
 #define RELAY_PIN0 9
@@ -53,7 +75,7 @@ const int LEDdelayLong = 100;
 int LEDdelay = LEDdelayLong;
 int ledPosition = 0; //current position in strip for pattern
 int ledState = 1;
-/*
+/* LED STATES MASTER
 0 off
 1 initial or disconnect leds (chasing blue)
 2 rainbow
@@ -69,15 +91,51 @@ First int is command number
 Second int is value 1
 Third int is value 2 (so you can send up to four bytes of data if you want)
 */
+/* RADIO COMMANDS MASTER
+ID 200: heartbeat. Data: [0, 0]
+ID 1: ThrottleVal update. Data: [raw value, 0]
+ID 2: ThrottleSW update. Data: [sw, 0]
+ID 3: LED mode update. Data: [ledMode (0, 1, 2), 0]
+ID 4: BOOST switch update. Data: [boostMode (0, 1), 0]
+ID 5: lux sensor update. Data: [luxVal, passingEnableThreshold (0, 1)]
+
+ID 10: Ask controller to send state of all peripherals
+ID 11: Controller force screen update
+ID 12: VESC data (rpm, etc)
+ID 13: Play tone
+*/
+
+typedef enum {
+  HEARTBEAT = 200,
+  
+  //Controller -> Board
+  THROTTLE_VAL = 1,
+  THROTTLE_SW = 2,
+  LEDMODE = 3,
+  BOOSTMODE = 4,
+  LUX_VAL = 5,
+
+  //Board -> Controller
+  SENDALLDATA = 10,
+  SCREENUPDATE = 11,
+  VESCDATA = 12,
+  TONE = 13
+} RADIO_COMMANDS;
+
 int dataRx[3];
 int dataTx[3];
 unsigned long prevHBMillis = 0;
-const int HBTimeoutMax = 3000; //max time between signals before board cuts the motors
+const int HBTimeoutMax = 1000; //max time between signals before board cuts the motors
 boolean radioListening = false;
 
 //IMU pins/defs
 Adafruit_LSM303_Accel_Unified accel = Adafruit_LSM303_Accel_Unified(54321);
-const char ACCEL_AXIS = 'x'; //axis that board accelerates along; used for accel math
+typedef enum {
+  X = 0,
+  Y = 1,
+  Z = 2
+} ACCEL_AXES;
+const int ACCEL_AXIS = X; //axis that board accelerates along; used for accel math
 
 //General pins/defs
 int MASTER_STATE = 0;
@@ -138,13 +196,13 @@ void loop() {
       resetDataRx();
       if (radio.available()) {
         radio.read(&dataRx, sizeof(dataRx));
-        if (dataRx[0] == 200) { //200 is "heartbeat" signal
+        if (dataRx[0] == HEARTBEAT) { //200 is "heartbeat" signal
           Serial.println("Got first heartbeat signal from controller; we're go");
           ledState = 0; //Make sure LEDs are off
 
           radioTransmitMode();
           resetDataTx();
-          dataTx[0] = 200;
+          dataTx[0] = HEARTBEAT;
           radio.write(&dataTx, sizeof(dataTx)); //send one back
 
           prevHBMillis = millis();
@@ -157,7 +215,7 @@ void loop() {
       if (radio.available()) {
         resetDataRx();
         radio.read(&dataRx, sizeof(dataRx));
-        /*if (dataRx[0] != 200) {
+        /*if (dataRx[0] != HEARTBEAT) {
           Serial.print("Got event #: ");
           Serial.print(dataRx[0]);
           Serial.print(", value1: ");
@@ -166,10 +224,14 @@ void loop() {
           Serial.println(dataRx[2]);
         }*/
         switch (dataRx[0]) {
-          case 1: //1 is throttle update
-            targetPPM = dataRx[1];
+          case THROTTLE_VAL: //1 is throttle update
+            realRAW = dataRx[1];
             break;
-          case 2: //2 is led mode update
+          case THROTTLE_SW:
+            throttleEnabled = dataRx[1];
+          case BOOSTMODE:
+            boostEnabled = dataRx[1];
+          case LEDMODE: //2 is led mode update
             if (dataRx[1] <= 3) { //sanity check
               if (dataRx[1] > 0) {
                 digitalWrite(RELAY_PIN0, LOW); //Enable leds
@@ -181,11 +243,11 @@ void loop() {
               ledState = dataRx[1];
             }
             break;
-          case 200: //heartbeat. if we get one, we should send one
+          case HEARTBEAT: //heartbeat. if we get one, we should send one
             // Serial.println("controller hb recieved");
             radioTransmitMode();
             resetDataTx();
-            dataTx[0] = 200;
+            dataTx[0] = HEARTBEAT;
             radio.write(&dataTx, sizeof(dataTx));
 
             prevHBMillis = millis();
@@ -198,13 +260,13 @@ void loop() {
       resetDataRx();
       if (radio.available()) {
         radio.read(&dataRx, sizeof(dataRx));
-        if (dataRx[0] == 200) { //200 is "heartbeat" signal
+        if (dataRx[0] == HEARTBEAT) { //200 is "heartbeat" signal
           Serial.println("Got heartbeat signal from controller after disconnection");
           ledState = 0; //Make sure LEDs are off
 
           radioTransmitMode();
           resetDataTx();
-          dataTx[0] = 200;
+          dataTx[0] = SENDALLDATA; //Set sendAllData flag (SAD flag) on controller to poll all values
           radio.write(&dataTx, sizeof(dataTx));
           
           prevHBMillis = millis();
@@ -246,12 +308,10 @@ void loop() {
         break;
       case 3: //color changes based on throttle (chaser again)
         LEDdelay = LEDdelayShort;
-        int greenChannel = map(targetPPM, ESC_MIN, ESC_MAX, 0, 255);
-        int redChannel = map(ESC_MAX-targetPPM, ESC_MIN, ESC_MAX, 0, 255);
-        leds[ledPosition] = CRGB(redChannel, 0, greenChannel);
-        ledPosition++;
-        if (ledPosition > NUM_LEDS-1) {
-          ledPosition = 0;
+        int greenChannel = map(realPPM, ESC_MIN, ESC_MAX, 0, 255);
+        int redChannel = map(ESC_MAX-realPPM, ESC_MIN, ESC_MAX, 0, 255);
+        for (int i=0; i<NUM_LEDS; i++) {
+          leds[i] = CRGB(redChannel, 0, greenChannel);
         }
         FastLED.show();
         break;
@@ -288,48 +348,59 @@ void transitionState(int newState) {
       Serial.println("Uhoh we've lost connection to the remote :(");
       ledState = 1; //go back into disconnected mode
       digitalWrite(RELAY_PIN0, LOW);
-      targetPPM = ESC_STOP; //set target to 0 speed to bring us back down to 0 speed
+      realPPM = ESC_STOP; //set target to 0 speed to bring us back down to 0 speed
       break;
   }  
 }
 
 void updateESC() {
   //Sensor update code (for now just print lol)
-  sensors_event_t event;
+  /*sensors_event_t event;
   accel.getEvent(&event);
   if (event.acceleration.x > 5) {
     switch (ACCEL_AXIS) {
-      case 'x':
+      case X:
         Serial.print("AX: ");
         Serial.println(event.acceleration.x);
         break;
-      case 'y':
+      case Y:
         Serial.print("AY: ");
         Serial.println(event.acceleration.y);
         break;
-      case 'z':
+      case Z:
         Serial.print("AZ: ");
         Serial.println(event.acceleration.z);
         break;
     }
-  }
+  }*/
 
   //TODO MAKE THIS BIG BRAIN WITH ACCELERATION DATA
-  unsigned long currentMillis = millis();
-  if (currentMillis-prevSpeedMillis > 50) {
-    prevSpeedMillis = currentMillis;
-    
-    if (targetPPM > realPPM) { //we need to go
-      realPPM += (targetPPM-realPPM)/20;
-    } else if (targetPPM < realPPM) { //brake faster!
-      realPPM += (targetPPM-realPPM)/10;
-    }
 
-    if (abs(targetPPM-ESC_STOP) < 100 || targetPPM == 1400) { //deadband of 100ppm AND catch joystick code not being updated
-      targetPPM = ESC_STOP;
-    }
+  if (abs(targetPPM-ESC_STOP) < 50) {
+    targetPPM = ESC_STOP;
   }
-  realPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits
+
+  if (throttleEnabled) {
+    realRAW = constrain(realRAW, JOY_MIN, JOY_MAX); //constrain raw value
+    targetPPM = map(realRAW, JOY_MIN, JOY_MAX, ESC_MIN, (boostEnabled) ? ESC_MAX : ESC_NONBOOST_MAX); //calculate ppm
+    targetPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits for safety even tho it should never be an issue
+  } else {
+    targetPPM = ESC_STOP;
+  }
+
+  unsigned long currentMillis = millis();
+  int deltaMillis = currentMillis-prevSpeedMillis; //ensure that acceleration rate is constant no matter what loop rate is
+  int deltaPPM = targetPPM-realPPM;
+    //RATE: 5 ppm/ms
+
+  if (targetPPM > realPPM) { //we need to go
+    realPPM += deltaMillis*5;//(targetPPM-realPPM)/20;
+  } else if (targetPPM < realPPM) { //brake faster!
+    realPPM -= deltaMillis*5;//(targetPPM-realPPM)/10;
+  }
+  prevSpeedMillis = currentMillis;
+
+  realPPM = constrain(realPPM, ESC_MIN, ESC_MAX);
   ESC_LEFT.write(realPPM); //write the values
   ESC_RIGHT.write(realPPM);
 }
