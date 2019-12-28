@@ -62,7 +62,7 @@ int luxMinUpdate = 200;
 #define JOYSTICK_X A1
 #define JOYSTICK_Y A2
 #define JOYSTICK_SW 6
-int joystickPrevPos = 0;
+int hallPrevPos = 0;
 unsigned long lastJoySWDebounceTime = 0;
 
 //Batt pins
@@ -75,6 +75,16 @@ unsigned long lastBoostDebounceTime = 0;
 #define LED_2_SW 4
 unsigned long lastLEDDebounceTime = 0;
 int debounceDelay = 50;
+
+//Vesc data
+struct VREALTIME {
+  float speed;
+  float distanceTravelled;
+  float temp;
+  float inputVoltage;
+  float battPercent;
+};
+struct VREALTIME vesc_values_realtime;
 
 //Radio pins/defs
 RF24 radio(7, 8);
@@ -96,7 +106,7 @@ ID 5: lux sensor update. Data: [luxVal, passingEnableThreshold (0, 1)]
 
 ID 10: Ask controller to send state of all peripherals
 ID 11: Controller force screen update
-ID 12: VESC data (rpm, etc)
+ID 12: VESC data [id, value]. ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is fet temp, ID 4 is batt percent
 ID 13: Play tone
 */
 
@@ -117,10 +127,10 @@ typedef enum {
   TONE = 13
 } RADIO_COMMANDS;
 
-int dataRx[3];
-int dataTx[3];
+double dataRx[3];
+double dataTx[3];
 unsigned long prevHBMillis = 0;
-const int HBInterval = 250; //send a heartbeat every 250ms, 4x per second
+const int HBInterval = 125; //send a heartbeat every 125ms, 8x per second
 boolean radioListening = false;
 
 void setup() {
@@ -198,17 +208,17 @@ void loop() {
       break;
 
     case 1: //Normal operation
-      //Update joystick
-      int curPos = analogRead(JOYSTICK_X);
-      if (!throttleEnabled || abs(curPos) < 5) { //use deadzone of 5%
-        curPos = 0; //just set it to 0 if it's not enabled or within deadzone
+      //Update hall effect sensor
+      
+      if (!throttleEnabled || abs(curPos-127) < 5) { //use deadzone of 5%
+        throttlePos = 127; //just set it to 0 if it's not enabled or within deadzone
       }
-      if (curPos != joystickPrevPos) {
+      if (throttlePos != hallPrevPos) {
         //Update display
-        if (abs(curPos-joystickPrevPos) > 3) { //because display updates are kinda annoying, try to prevent as many as we can. make sure difference is at least 3%
+        if (abs(throttlePos-hallPrevPos) > 3) { //because display updates are kinda annoying, try to prevent as many as we can. make sure difference is at least 3%
           updateDisplay = true; //set display update flag for next timer cycle
-          Serial.print("JoyChgState:");
-          Serial.println(curPos);
+          Serial.print("HallChgState:");
+          Serial.println(throttlePos);
         }
 
         //Send position to board
@@ -218,7 +228,7 @@ void loop() {
         dataTx[1] = curPos;
         radio.write(&dataTx, sizeof(dataTx));
 
-        joystickPrevPos = curPos;
+        hallPrevPos = curPos;
       }
 
       //Update peripherals - lux sensor, boost switch and led mode switch with debouncing
@@ -315,7 +325,7 @@ void loop() {
     prevHBMillis = currentMillis;
   }
 
-  radioRecieveMode(); //Check for any data from the 
+  radioRecieveMode(); //Check for any data from the board
   if (radio.available()) {
     resetDataRx();
     radio.read(&dataRx, sizeof(dataRx));
@@ -344,14 +354,30 @@ void loop() {
         radio.write(&dataTx, sizeof(dataTx));
         resetDataTx();
         dataTx[0] = THROTTLE_VAL; //throttle update
-        dataTx[1] = joystickPrevPos;
+        dataTx[1] = hallPrevPos;
         radio.write(&dataTx, sizeof(dataTx));
         break;
       case SCREENUPDATE:
         updateDisplay = true; //set flag so as not to refresh too fast
         break;
-      case VESCDATA:
-        //TODO THIS
+      case VESCDATA: //ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is fet temp, ID 4 is batt percent
+        switch (dataRx[1]) {
+          case 0:
+            vesc_values_realtime.speed = dataRx[2];
+            break;
+          case 1:
+            vesc_values_realtime.distanceTravelled = dataRx[2];
+            break;
+          case 2:
+            vesc_values_realtime.inputVoltage = dataRx[2];
+            break;
+          case 3:
+            vesc_values_realtime.temp = dataRx[2];
+            break;
+          case 4:
+            vesc_values_realtime.battPercent = dataRx[2];
+            break;
+        }
         break;
       case TONE:
         asynchTone(dataRx[1], dataRx[2]); //Tone, time
@@ -373,12 +399,16 @@ void loop() {
     noTone(BUZZER_PIN);
     toneActive = false;
   }
+
+  radioRecieveMode(); //default to recieve mode so as to not drop transmissions
 }
 
 void asynchTone(int pitch, int time) { //time in ms
+  //if (!toneActive) { //make sure tone has expired before playing a new one (DISABLED)
   tone(BUZZER_PIN, pitch); //A5 note
   toneExpire = millis()+time;
   toneActive = true;
+  //}
 }
 
 void transitionState(int newState) {
@@ -410,7 +440,7 @@ void oledUpdateDisplay() {
   oled.println((ledMode == 2) ? "Rainbow" : (ledMode == 3) ? "ChgThrott" : "Off");
   oled.set2X();
   oled.println("________________");
-  oled.print(joystickPrevPos); //'recent enough' ig it's ok
+  oled.print(hallPrevPos); //'recent enough' ig it's ok
   oled.println("%");
 }
 

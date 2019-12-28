@@ -19,6 +19,8 @@
 #include <SPI.h>
 #include <nRF24L01.h>
 #include <RF24.h>
+#include <vesc.h> //Thank you to Gian Marcov for this awesome library: https://github.com/gianmarcov/arduino_vesc. Modified by me (Aaron Becker) to use SoftwareSerial instead of HardwareSerial
+#include <SoftwareSerial.h>
 
 //PIN DEFS
 
@@ -43,19 +45,26 @@ boolean throttleEnabled = false;
 boolean boostEnabled = false;
 
 
-struct vescMeasure {
-  //7 Values int16_t not read(14 byte)
-  float avgMotorCurrent;
-  float avgInputCurrent;
-  float dutyCycleNow;
-  long rpm;
-  float inpVoltage;
-  float ampHours;
-  float ampHoursCharged;
-  //2 values int32_t not read (8 byte)
-  long tachometer;
-  long tachometerAbs;
+#define VESC_UART_RX A0
+#define VESC_UART_TX A1
+SoftwareSerial vescSerial(VESC_UART_RX, VESC_UART_TX); //RX, TX
+Vesc VUART; //instantiate vescUart object
+vesc_version VVERSION;
+mc_configuration VCONFIG;
+float VRATIO_RPM_SPEED;
+float VRATIO_TACHO_KM;
+float VBATT_MAX;
+float VBATT_MIN;
+struct VREALTIME {
+  float speed;
+  float distanceTravelled;
+  float temp;
+  float inputVoltage;
+  float battPercent;
 };
+struct VREALTIME vesc_values_realtime;
+unsigned long prevVUpdateMillis = 0;
+int VUpdateMillis = 500; //time between vesc updates
 
 //Relay pins
 #define RELAY_PIN0 9
@@ -101,7 +110,7 @@ ID 5: lux sensor update. Data: [luxVal, passingEnableThreshold (0, 1)]
 
 ID 10: Ask controller to send state of all peripherals
 ID 11: Controller force screen update
-ID 12: VESC data (rpm, etc)
+ID 12: VESC data [id, value]. ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is fet temp, ID 4 is batt percent
 ID 13: Play tone
 */
 
@@ -122,10 +131,10 @@ typedef enum {
   TONE = 13
 } RADIO_COMMANDS;
 
-int dataRx[3];
-int dataTx[3];
+double dataRx[3]; //double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes
+double dataTx[3];
 unsigned long prevHBMillis = 0;
-const int HBTimeoutMax = 1000; //max time between signals before board cuts the motors
+const int HBTimeoutMax = 275; //max time between signals before board cuts the motors in ms
 boolean radioListening = false;
 
 //IMU pins/defs
@@ -141,6 +150,8 @@ const int ACCEL_AXIS = X; //axis that board accelerates along; used for accel ma
 int MASTER_STATE = 0;
 
 void setup() {
+  while (!Serial){;}
+
   Serial.begin(9600);
   Serial.println("ESKATEINIT_setup begin");
   
@@ -166,6 +177,27 @@ void setup() {
   }
   FastLED.show();
   Serial.println("Setup leds: ok");
+
+  //Setup VESC UART
+  pinMode(VESC_UART_TX, OUTPUT); //Set pins correct direction
+  pinMode(VESC_UART_RX, INPUT);
+  vescSerial.begin(115200);
+  while (!vescSerial) {;}
+  VUART.init(&vescSerial, &Serial); //Serial for debug port, vescSerial for communciations
+  delay(50);
+
+  VVERSION = VUART.getFirmwareVersion();
+  VCONFIG = VUART.getMotorConfiguration();
+  Serial.println("VESC Connection---")
+  Serial.println("FW major: " + String(version.major));
+  Serial.println("FW minor: " + String(version.minor));
+  //The following code yoinked directly from https://github.com/SolidGeek/nRF24-Esk8-Remote/blob/master/transmitter/transmitter.ino. Thanks SolidGeek :)
+  VRATIO_RPM_SPEED = (VCONFIG.si_gear_ratio * 60.0 * (float)VCONFIG.si_wheel_diameter * 3.14156) / (((float)VCONFIG.si_motor_poles / 2.0) * 1000000.0); // ERPM to Km/h
+  VRATIO_TACHO_KM = (VCONFIG.si_gear_ratio * (float)VCONFIG.si_wheel_diameter * 3.14156) / (((float)VCONFIG.si_motor_poles * 3.0) * 1000000.0); // Pulses to km travelled
+  VBATT_MAX = (float)VCONFIG.si_battery_cells*4.2; //assuming max charge of 4.2V per cell
+  VBATT_MIN = (float)VCONFIG.si_battery_cells*3.2; //assuming min charge of 3.2V per cell
+
+  Serial.println("Setup VESC: ok"); //TODO add check if it's null or 0 so it can fail properly
 
   //Setup accelerometer
   if (!accel.begin()) {
@@ -322,9 +354,39 @@ void loop() {
     transitionState(2);
   }
 
-  updateESC();
-}
+  if (currentMillis-prevVUpdateMillis >= VUpdateMillis && MASTER_STATE == 1) { //Time for VESC update
+    prevVUpdateMillis = currentMillis;
 
+    updateVESCData();
+    radioTransmitMode();
+    resetDataTx();
+    //ID 12: VESC data [id, value]. ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is fet temp, ID 4 is batt percent
+    dataTx[0] = 12;
+    dataTx[1] = 0;
+    dataTx[2] = vesc_values_realtime.speed;
+    radio.write(&dataTx, sizeof(dataTx));
+
+    dataTx[1] = 1;
+    dataTx[2] = vesc_values_realtime.distanceTravelled;
+    radio.write(&dataTx, sizeof(dataTx)); 
+    
+    dataTx[1] = 2;
+    dataTx[2] = vesc_values_realtime.inputVoltage;
+    radio.write(&dataTx, sizeof(dataTx)); 
+
+    dataTx[1] = 3;
+    dataTx[2] = vesc_values_realtime.temp;
+    radio.write(&dataTx, sizeof(dataTx));
+
+    dataTx[1] = 4;
+    dataTx[2] = vesc_values_realtime.battPercent;
+    radio.write(&dataTx, sizeof(dataTx));     
+  }
+
+  updateESC(); //Update ESC with throttle value
+
+  radioRecieveMode(); //Set radio back to recieve mode at end of loop
+}
 
 
 void transitionState(int newState) {
@@ -351,6 +413,33 @@ void transitionState(int newState) {
       realPPM = ESC_STOP; //set target to 0 speed to bring us back down to 0 speed
       break;
   }  
+}
+
+float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+void updateVESCData() {
+  float distance = (float)VUART.getTachometerAbsValue()*VRATIO_TACHO_KM;
+  Serial.println("Distance travelled (tachometer): "+String(distance));
+  vesc_values_realtime.distanceTravelled = distance;
+
+  float speed = (float)VUART.getRPM()*VRATIO_RPM_SPEED;
+  Serial.println("Current speed (rpm): "+String(speed));
+  vesc_values_realtime.speed = speed;
+
+  float fetT = VUART.getFetTemperature();
+  Serial.println("Current FETTemp: "+String(fetT));
+  vesc_values_realtime.temp = fetT;
+
+  float inpVoltage = VUART.getInputVoltage();
+  Serial.println("Current inpVoltage: "+String(inpVoltage));
+  vesc_values_realtime.inputVoltage = inpVoltage;
+
+  float battPercent = mapFloat(inpVoltage, VBATT_MIN, VBATT_MAX, 0, 100);
+  battPercent = (battPercent < VBATT_MIN) ? VBATT_MIN : (battPercent > VBATT_MAX) ? VBATT_MAX : battPercent;
+  Serial.println("Current battPercent: "+String(battPercent));
+  vesc_values_realtime.battPercent = battPercent;
 }
 
 void updateESC() {
