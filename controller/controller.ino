@@ -33,12 +33,6 @@ int oldLedMode = -1;
 
 //PIN DEFS
 
-//Escs (from skateboard)
-#define ESC_MIN 800
-#define ESC_MAX 2000
-#define THROTTLE_NONBOOST_MAX 70 //in percent
-#define ESC_STOP (ESC_MIN+ESC_MAX)/2;
-
 //Buzzer
 #define BUZZER_PIN 9
 unsigned long toneExpire = 0;
@@ -58,12 +52,21 @@ int oldLux = -1;
 unsigned long prevLuxUpdateMillis = 0;
 int luxMinUpdate = 200;
 
-//Joystick pins/setup
-#define JOYSTICK_X A1
-#define JOYSTICK_Y A2
-#define JOYSTICK_SW 6
-int hallPrevPos = 0;
-unsigned long lastJoySWDebounceTime = 0;
+//Throttle pins/setup
+#define HALLEFFECT A1
+#define ENABLE_SW 6
+const int throttleDeadzone = 4;
+#define THROTTLE_MIN 0
+#define THROTTLE_MAX 255
+#define THROTTLE_STOP (THROTTLE_MIN+THROTTLE_MAX)/2
+
+#define HALL_MIN 0
+#define HALL_MAX 1023
+#define HALL_CENTER (HALL_MIN+HALL_MAX)/2
+unsigned long lastEnSWDebounceTime = 0;
+
+int prevThrottle = THROTTLE_STOP;
+int throttle = THROTTLE_STOP;
 
 //Batt pins
 #define VBATT A0
@@ -209,29 +212,42 @@ void loop() {
 
     case 1: //Normal operation
       //Update hall effect sensor
-      
-      if (!throttleEnabled || abs(curPos-127) < 5) { //use deadzone of 5%
-        throttlePos = 127; //just set it to 0 if it's not enabled or within deadzone
+      int measurement = 0;
+      for (int i=0; i<10; i++) { //take average reading over 10 samples to reduce noise
+        measurement += analogRead(HALLEFFECT);
       }
-      if (throttlePos != hallPrevPos) {
+      measurement /= 10;
+
+      if (measurement >= HALL_CENTER) { //if true, we're going forward = >127 value
+        int forwardVal = map(measurement, HALL_CENTER, HALL_MAX, THROTTLE_STOP, THROTTLE_MAX); //map from middle to max (127-255)
+        throttle = constrain(forwardVal, THROTTLE_STOP, THROTTLE_MAX); //make sure it's in range
+      } else { //if false, we're going backward
+        int backwardVal = map(measurement, HALL_MIN, HALL_CENTER, THROTTLE_MIN, THROTTLE_STOP); //map from min to middle (0, 127)
+        throttle = constrain(backwardVal, THROTTLE_MIN, THROTTLE_STOP); //make sure it's in range
+      }
+      
+      if (abs(throttle-THROTTLE_STOP) < throttleDeadzone) { //use deadzone of throttleDeadzone%
+        throttle = THROTTLE_STOP; //just set it to 0 if it's not enabled or within deadzone
+      }
+      if (throttle != prevThrottle) {
         //Update display
-        if (abs(throttlePos-hallPrevPos) > 3) { //because display updates are kinda annoying, try to prevent as many as we can. make sure difference is at least 3%
+        if (abs(throttle-prevThrottle) > 3) { //because display updates are kinda annoying, try to prevent as many as we can. make sure difference is at least 3%
           updateDisplay = true; //set display update flag for next timer cycle
           Serial.print("HallChgState:");
-          Serial.println(throttlePos);
+          Serial.println(throttle);
         }
 
         //Send position to board
         radioTransmitMode();
         resetDataTx();
         dataTx[0] = THROTTLE_VAL; //throttle update
-        dataTx[1] = curPos;
+        dataTx[1] = throttle;
         radio.write(&dataTx, sizeof(dataTx));
 
-        hallPrevPos = curPos;
+        prevThrottle = throttle;
       }
 
-      //Update peripherals - lux sensor, boost switch and led mode switch with debouncing
+      //Update peripherals - lux sensor, boost switch, led mode switch, throttle switch with debouncing
       sensors_event_t event;
       tsl.getEvent(&event);
       if (event.light) { //make sure sensor isn't overloaded
@@ -354,7 +370,7 @@ void loop() {
         radio.write(&dataTx, sizeof(dataTx));
         resetDataTx();
         dataTx[0] = THROTTLE_VAL; //throttle update
-        dataTx[1] = hallPrevPos;
+        dataTx[1] = prevThrottle;
         radio.write(&dataTx, sizeof(dataTx));
         break;
       case SCREENUPDATE:
@@ -440,7 +456,7 @@ void oledUpdateDisplay() {
   oled.println((ledMode == 2) ? "Rainbow" : (ledMode == 3) ? "ChgThrott" : "Off");
   oled.set2X();
   oled.println("________________");
-  oled.print(hallPrevPos); //'recent enough' ig it's ok
+  oled.print(prevThrottle); //'recent enough' ig it's ok
   oled.println("%");
 }
 
