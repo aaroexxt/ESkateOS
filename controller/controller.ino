@@ -54,7 +54,7 @@ int luxMinUpdate = 200;
 
 //Throttle pins/setup
 #define HALLEFFECT A1
-#define ENABLE_SW 6
+#define THROTT_ENABLE_SW 6
 const int throttleDeadzone = 4;
 #define THROTTLE_MIN 0
 #define THROTTLE_MAX 255
@@ -140,9 +140,8 @@ void setup() {
   Serial.begin(9600);
   Serial.println("Eskate controller setup begin");
 
-  pinMode(JOYSTICK_X, INPUT);
-  pinMode(JOYSTICK_Y, INPUT);
-  pinMode(JOYSTICK_SW, INPUT_PULLUP);
+  pinMode(HALLEFFECT, INPUT);
+  pinMode(THROTT_ENABLE_SW, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(BOOST_SW, INPUT_PULLUP);
   pinMode(LED_1_SW, INPUT_PULLUP);
@@ -264,11 +263,11 @@ void loop() {
         }
       }
 
-      throttleEnabled = !digitalRead(JOYSTICK_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
+      throttleEnabled = !digitalRead(THROTT_ENABLE_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
       if (throttleEnabled != oldThrottleEnabled) {
-        lastJoySWDebounceTime = currentMillis;
+        lastEnSWDebounceTime = currentMillis;
       }
-      if ((currentMillis - lastJoySWDebounceTime) > debounceDelay) { //give it time to settle
+      if ((currentMillis - lastEnSWDebounceTime) > debounceDelay) { //give it time to settle
         if (throttleEnabled != oldThrottleEnabled) { //Ensure it's still actually different
           updateDisplay = true; //set display update flag for next timer cycle
           Serial.print("ThrottleSWState:");
@@ -345,7 +344,7 @@ void loop() {
   if (radio.available()) {
     resetDataRx();
     radio.read(&dataRx, sizeof(dataRx));
-    switch (dataRx[0]) {
+    switch ((int)dataRx[0]) {
       case SENDALLDATA:
         radioTransmitMode();
         resetDataTx();
@@ -377,7 +376,7 @@ void loop() {
         updateDisplay = true; //set flag so as not to refresh too fast
         break;
       case VESCDATA: //ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is fet temp, ID 4 is batt percent
-        switch (dataRx[1]) {
+        switch ((int)dataRx[1]) {
           case 0:
             vesc_values_realtime.speed = dataRx[2];
             break;

@@ -12,12 +12,8 @@
 */
 
 #include <ServoTimer2.h>
-#include <Adafruit_LSM303_Accel.h>
-#include <Adafruit_Sensor.h>
 #include <Wire.h>
 #include <FastLED.h>
-#include <SPI.h>
-#include <nRF24L01.h>
 #include <RF24.h>
 #include <vesc.h> //Thank you to Gian Marcov for this awesome library: https://github.com/gianmarcov/arduino_vesc. Modified by me (Aaron Becker) to use SoftwareSerial instead of HardwareSerial
 #include <SoftwareSerial.h>
@@ -49,18 +45,12 @@ boolean boostEnabled = false;
 #define VESC_UART_TX A1
 SoftwareSerial vescSerial(VESC_UART_RX, VESC_UART_TX); //RX, TX
 Vesc VUART; //instantiate vescUart object
-vesc_version VVERSION;
-mc_configuration VCONFIG;
 float VRATIO_RPM_SPEED;
 float VRATIO_TACHO_KM;
 float VBATT_MAX;
 float VBATT_MIN;
 unsigned long prevVUpdateMillis = 0;
 #define VUpdateMillis 500 //time between vesc updates
-
-//Relay pins
-#define RELAY_PIN0 9
-#define RELAY_PIN1 10
 
 //Led pins/defs
 #define LED_DATA_PIN    3
@@ -129,15 +119,6 @@ unsigned long prevHBMillis = 0;
 const int HBTimeoutMax = 275; //max time between signals before board cuts the motors in ms
 boolean radioListening = false;
 
-//IMU pins/defs
-Adafruit_LSM303_Accel_Unified accel = Adafruit_LSM303_Accel_Unified(54321);
-typedef enum {
-  X = 0,
-  Y = 1,
-  Z = 2
-} ACCEL_AXES;
-const int ACCEL_AXIS = X; //axis that board accelerates along; used for accel math
-
 //General pins/defs
 int MASTER_STATE = 0;
 
@@ -146,12 +127,6 @@ void setup() {
 
   Serial.begin(9600);
   Serial.println("ESKATEINIT_setup begin");
-  
-  //Setup relays and pins
-  pinMode(RELAY_PIN0, OUTPUT);
-  pinMode(RELAY_PIN1, OUTPUT);
-  digitalWrite(RELAY_PIN0, LOW); //enable leds
-  digitalWrite(RELAY_PIN1, HIGH); //disable second currently unused pin
 
   //Setup ESC
   ESC_LEFT.attach(ESC_L_PIN);
@@ -178,27 +153,9 @@ void setup() {
   VUART.init(&vescSerial, &Serial); //Serial for debug port, vescSerial for communciations
   delay(50);
 
-  VVERSION = VUART.getFirmwareVersion();
-  VCONFIG = VUART.getMotorConfiguration();
-  Serial.println("VESC Connection---");
-  Serial.println("FW major: " + String(VVERSION.major));
-  Serial.println("FW minor: " + String(VVERSION.minor));
-  //The following code yoinked directly from https://github.com/SolidGeek/nRF24-Esk8-Remote/blob/master/transmitter/transmitter.ino. Thanks SolidGeek :)
-  VRATIO_RPM_SPEED = (VCONFIG.si_gear_ratio * 60.0 * (float)VCONFIG.si_wheel_diameter * 3.14156) / (((float)VCONFIG.si_motor_poles / 2.0) * 1000000.0); // ERPM to Km/h
-  VRATIO_TACHO_KM = (VCONFIG.si_gear_ratio * (float)VCONFIG.si_wheel_diameter * 3.14156) / (((float)VCONFIG.si_motor_poles * 3.0) * 1000000.0); // Pulses to km travelled
-  VBATT_MAX = (float)VCONFIG.si_battery_cells*4.2; //assuming max charge of 4.2V per cell
-  VBATT_MIN = (float)VCONFIG.si_battery_cells*3.2; //assuming min charge of 3.2V per cell
+  calculateRatios();
 
   Serial.println("Setup VESC: ok"); //TODO add check if it's null or 0 so it can fail properly
-
-  //Setup accelerometer
-  if (!accel.begin()) {
-    Serial.println("Setup accel: fail. not detected :(");
-    while(1){}
-  }
-  accel.setRange(LSM303_RANGE_4G);
-  accel.setMode(LSM303_MODE_NORMAL);
-  Serial.println("Setup accel: ok");
 
   //Setup radio
   radio.begin();
@@ -263,10 +220,7 @@ void loop() {
             boostEnabled = dataRx[1];
           case LEDMODE: //2 is led mode update
             if (dataRx[1] <= 3) { //sanity check
-              if (dataRx[1] > 0) {
-                digitalWrite(RELAY_PIN0, LOW); //Enable leds
-              } else {
-                digitalWrite(RELAY_PIN0, HIGH); //Disable leds
+              if (dataRx[1] == 0) {
                 FastLED.clear();
                 FastLED.show();
               }
@@ -404,20 +358,44 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+void calculateRatios() { //seperate function to save ram
+  /*
+    So, sad news.
+    The Arduino Nano doesn't have enough memory to store the mc_configuration struct because it's huge, so I had to hardcode some of this :()
+    Otherwise, it would have been super cool because then 
+  */
+  // mc_configuration VCONFIG = VUART.getMotorConfiguration();
+  // int motorPulley = VCONFIG.si_motor_pulley;
+  // int wheelPulley = VCONFIG.si_wheel_pulley;
+  // int gearRatio = (float)motorPulley / (float)wheelPulley;
+  // int wheelDiameter = VCONFIG.si_wheel_diameter;
+  // int motorPoles = VCONFIG.si_motor_poles;
+  // int batteryCells = VCONFIG.si_battery_cells;
+
+  //Hardcoded lol
+  int motorPulley = 1;
+  int wheelPulley = 1;
+  int gearRatio = (float)motorPulley / (float)wheelPulley;
+  int wheelDiameter = 87;
+  int motorPoles = 14;
+  int batteryCells = 10;
+
+
+  Serial.println("VESC Connection---");
+  //The following code yoinked directly from https://github.com/SolidGeek/nRF24-Esk8-Remote/blob/master/transmitter/transmitter.ino. Thanks SolidGeek :)
+  VRATIO_RPM_SPEED = (gearRatio * 60.0 * (float)wheelDiameter * 3.14156) / (((float)motorPoles / 2.0) * 1000000.0); // ERPM to Km/h
+  VRATIO_TACHO_KM = (gearRatio * (float)wheelDiameter * 3.14156) / (((float)motorPoles * 3.0) * 1000000.0); // Pulses to km travelled
+  VBATT_MAX = (float)batteryCells*4.2; //assuming max charge of 4.2V per cell
+  VBATT_MIN = (float)batteryCells*3.2; //assuming min charge of 3.2V per cell
+}
 
 void transitionState(int newState) {
   MASTER_STATE = newState;
   Serial.print("New state: ");
   Serial.println(newState);
   switch (newState) {
-    case 0:
-      digitalWrite(RELAY_PIN0, LOW); //enable the leds by default
-      break;
     case 1:
-      if (ledState > 0) { //enable/disable the leds based on what's going on
-        digitalWrite(RELAY_PIN0, LOW);
-      } else {
-        digitalWrite(RELAY_PIN0, HIGH);
+      if (ledState == 0) { //enable/disable the leds based on what's going on
         FastLED.clear();
         FastLED.show();
       }
@@ -425,35 +403,12 @@ void transitionState(int newState) {
     case 2: //uhoh we are going into remote disconnect mode
       Serial.println("Uhoh we've lost connection to the remote :(");
       ledState = 1; //go back into disconnected mode
-      digitalWrite(RELAY_PIN0, LOW);
       realPPM = ESC_STOP; //set target to 0 speed to bring us back down to 0 speed
       break;
   }  
 }
 
 void updateESC() {
-  //Sensor update code (for now just print lol)
-  /*sensors_event_t event;
-  accel.getEvent(&event);
-  if (event.acceleration.x > 5) {
-    switch (ACCEL_AXIS) {
-      case X:
-        Serial.print("AX: ");
-        Serial.println(event.acceleration.x);
-        break;
-      case Y:
-        Serial.print("AY: ");
-        Serial.println(event.acceleration.y);
-        break;
-      case Z:
-        Serial.print("AZ: ");
-        Serial.println(event.acceleration.z);
-        break;
-    }
-  }*/
-
-  //TODO MAKE THIS BIG BRAIN WITH ACCELERATION DATA
-
   if (abs(targetPPM-ESC_STOP) < 50) {
     targetPPM = ESC_STOP;
   }
