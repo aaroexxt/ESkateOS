@@ -19,8 +19,7 @@
 
 #include <SPI.h>
 #include <Wire.h>
-#include "SSD1306Ascii.h" //Thank god for Bill Greiman who came up with a library that uses less memory
-#include "SSD1306AsciiWire.h"
+#include <U8g2lib.h>
 
 int MASTER_STATE = 0;
 boolean throttleEnabled = false;
@@ -41,9 +40,37 @@ boolean toneActive = false;
 //OLED
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
-SSD1306AsciiWire oled;
+// Defining the type of display used (128x64)
+U8G2_SSD1305_128X64_ADAFRUIT_2_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE); //No rotation
 unsigned long prevDispUpdateMillis = 0;
 int dispMinUpdate = 200; //minimum time between display updates in ms to make sure we don't update faster than what the screen can handle
+char displayBuffer[20];
+String displayString;
+
+//All bitmaps are in XBM format
+const PROGMEM unsigned char logo_bits[] = {
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0x00, 0x80, 0x3c, 0x01,
+  0xe0, 0x00, 0x07, 0x70, 0x18, 0x0e, 0x30, 0x18, 0x0c, 0x98, 0x99, 0x19,
+  0x80, 0xff, 0x01, 0x04, 0xc3, 0x20, 0x0c, 0x99, 0x30, 0xec, 0xa5, 0x37,
+  0xec, 0xa5, 0x37, 0x0c, 0x99, 0x30, 0x04, 0xc3, 0x20, 0x80, 0xff, 0x01,
+  0x98, 0x99, 0x19, 0x30, 0x18, 0x0c, 0x70, 0x18, 0x0e, 0xe0, 0x00, 0x07,
+  0x80, 0x3c, 0x01, 0x00, 0x7e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+const PROGMEM unsigned char signal_transmitting_bits[] = {
+  0x18, 0x00, 0x0c, 0x00, 0xc6, 0x00, 0x66, 0x00, 0x23, 0x06, 0x33, 0x0f,
+  0x33, 0x0f, 0x23, 0x06, 0x66, 0x00, 0xc6, 0x00, 0x0c, 0x00, 0x18, 0x00
+};
+
+const PROGMEM unsigned char signal_connected_bits[] = {
+  0x18, 0x00, 0x0c, 0x00, 0xc6, 0x00, 0x66, 0x00, 0x23, 0x06, 0x33, 0x09,
+  0x33, 0x09, 0x23, 0x06, 0x66, 0x00, 0xc6, 0x00, 0x0c, 0x00, 0x18, 0x00
+};
+
+const PROGMEM unsigned char signal_noconnection_bits[] = {
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x09,
+  0x00, 0x09, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
 
 //TSL9521 Lux sensor
 Adafruit_TSL2561_Unified tsl = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT, 12345);
@@ -69,7 +96,7 @@ int prevThrottle = THROTTLE_STOP;
 int throttle = THROTTLE_STOP;
 
 //Batt pins
-#define VBATT A0
+#define VBATT_PIN A0
 
 //LED & boost pins
 #define BOOST_SW 3
@@ -141,7 +168,8 @@ void setup() {
   Serial.println("Eskate controller setup begin");
 
   pinMode(HALLEFFECT, INPUT);
-  pinMode(THROTT_ENABLE_SW, INPUT);
+  pinMode(THROTT_ENABLE_SW, INPUT_PULLUP);
+  pinMode(VBATT_PIN, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(BOOST_SW, INPUT_PULLUP);
   pinMode(LED_1_SW, INPUT_PULLUP);
@@ -159,18 +187,10 @@ void setup() {
   //Setup Wire lib
   Wire.begin();
   Wire.setClock(400000L);
-  //Actually init display
-  oled.begin(&Adafruit128x64, 0x3C); //connect to display
-  oled.setFont(Adafruit5x7);
-  oled.clear();
-  oled.set2X();
-  oled.println("EskateOS V1");
-  oled.println("By:");
-  oled.println("AaronBecker");
-  oled.println();
-  oled.println();
-  oled.set1X();
-  oled.println("Hope you enjoy :)");
+
+  u8g2.setI2CAddress(0x3C);
+  u8g2.begin(); //Initialize display
+  drawStartScreen();
   
   Serial.println("OLED display: ok");
 
@@ -406,7 +426,7 @@ void loop() {
     updateDisplay = false;
     prevDispUpdateMillis = currentMillis;
     
-    oledUpdateDisplay();
+    updateDisplay();
   }
 
   //End tone if it's expired
@@ -432,11 +452,11 @@ void transitionState(int newState) {
   Serial.println(newState);
   switch (newState) {
     case 0:
-      oled.clear();
-      oled.set2X();
-      oled.println("Waiting for");
-      oled.println("connection");
-      oled.println("...");
+      // oled.clear();
+      // oled.set2X();
+      // oled.println("Waiting for");
+      // oled.println("connection");
+      // oled.println("...");
       break;
     case 1:
       oledUpdateDisplay();
@@ -444,52 +464,26 @@ void transitionState(int newState) {
   }  
 }
 
-void oledUpdateDisplay() {
-  oled.clear();
-  oled.set2X();
-  oled.println("________________");
-  oled.set1X();
-  oled.print("BOOST: ");
-  oled.println((boostEnabled)?"Enabled":"Disabled");
-  oled.print("LED Mode: ");
-  oled.println((ledMode == 2) ? "Rainbow" : (ledMode == 3) ? "ChgThrott" : "Off");
-  oled.set2X();
-  oled.println("________________");
-  oled.print(prevThrottle); //'recent enough' ig it's ok
-  oled.println("%");
+void drawStartScreen() {
+  u8g2.firstPage();
+  do {
+    u8g2.drawXBM(4, 4, 24, 24, logo_bits);
+
+    displayString = "EskateOS V2";
+    displayString.toCharArray(displayBuffer, 12);
+    u8g2.setFont(u8g2_font_helvR10_tr);
+    u8g2.drawStr(34, 22, displayBuffer);
+
+    displayString = "By Aaron Becker";
+    displayString.toCharArray(displayBuffer, 16);
+    u8g2.drawStr(5, 44, displayBuffer);
+  } while ( u8g2.nextPage() );
 }
 
-//Old display update code:
-  /*
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setCursor(0,0);
-  display.println("BOOST: Disabled");
-  display.setCursor(0,10);
-  display.println("LED Mode: Disabled");
-  display.drawLine(0,20,SCREEN_WIDTH,20,WHITE);
-  display.setCursor(0,30);
-  display.setTextSize(24);
-  display.println("0%");
-  display.display();
-
-  display.fillRect(0,0, SCREEN_WIDTH, 10, BLACK); //clear display here
-  display.setTextSize(1);
-  display.setCursor(0,0);
-  display.println("BOOST: "+(boostEnabled)?"Enabled":"Disabled");
-  display.display();
-
-  display.fillRect(0,10, SCREEN_WIDTH, 10, BLACK); //clear display here
-  display.setTextSize(1);
-  display.setCursor(0,10);
-  display.println("LED Mode: "+ledMode);
-  display.display();
-
-  display.setCursor(0,30);
-  display.fillRect(0,30, SCREEN_WIDTH, SCREEN_HEIGHT-30, BLACK); //clear display here
-  display.setTextSize(24);
-  display.println(curY+"%");
-  display.display();*/
+void updateDisplay() {
+  //draw throttle, page, batt, signal
+  
+}
 
 void radioRecieveMode() {
   if (!radioListening) { //if we're not listening
