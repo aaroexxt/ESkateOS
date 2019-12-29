@@ -40,7 +40,7 @@ unsigned long prevSpeedMillis = 0;
 boolean throttleEnabled = false;
 boolean boostEnabled = false;
 
-
+//VESC pins/defs
 #define VESC_UART_RX A0
 #define VESC_UART_TX A1
 SoftwareSerial vescSerial(VESC_UART_RX, VESC_UART_TX); //RX, TX
@@ -75,7 +75,7 @@ int ledState = 1;
 
 //Radio pins/defs
 RF24 radio(7, 8);
-const byte addresses [][6] = {"00001", "00002"}; //write at addr 00002, read at addr 00001
+const PROGMEM byte addresses [][6] = {"00001", "00002"}; //write at addr 00002, read at addr 00001
 //Send 6 bytes (because each int is 2 bytes) per rx/tx
 /*Data structure:
 First int is command number
@@ -116,7 +116,7 @@ typedef enum {
 double dataRx[3]; //double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes
 double dataTx[3];
 unsigned long prevHBMillis = 0;
-const int HBTimeoutMax = 275; //max time between signals before board cuts the motors in ms
+#define HBTimeoutMax 275 //max time between signals before board cuts the motors in ms
 boolean radioListening = false;
 
 //General pins/defs
@@ -320,16 +320,16 @@ void loop() {
     Serial.println(String(speed));
 
     float fetT = VUART.getFetTemperature();
-    Serial.println(F("Current FETTemp: "));
+    Serial.print(F("Current FETTemp: "));
     Serial.println(String(fetT));
 
     float inpVoltage = VUART.getInputVoltage();
-    Serial.println(F("Current inpVoltage: "));
+    Serial.print(F("Current inpVoltage: "));
     Serial.println(String(inpVoltage));
 
     float battPercent = mapFloat(inpVoltage, VBATT_MIN, VBATT_MAX, 0, 100);
     battPercent = (battPercent < VBATT_MIN) ? VBATT_MIN : (battPercent > VBATT_MAX) ? VBATT_MAX : battPercent;
-    Serial.println(F("Current battPercent: "));
+    Serial.print(F("Current battPercent: "));
     Serial.println(String(battPercent));
 
     dataTx[0] = 12;

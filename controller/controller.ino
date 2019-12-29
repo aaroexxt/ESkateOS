@@ -55,7 +55,7 @@ int luxMinUpdate = 200;
 //Throttle pins/setup
 #define HALLEFFECT A1
 #define THROTT_ENABLE_SW 6
-const int throttleDeadzone = 4;
+#define throttleDeadzone 4
 #define THROTTLE_MIN 0
 #define THROTTLE_MAX 255
 #define THROTTLE_STOP (THROTTLE_MIN+THROTTLE_MAX)/2
@@ -91,7 +91,7 @@ struct VREALTIME vesc_values_realtime;
 
 //Radio pins/defs
 RF24 radio(7, 8);
-const byte addresses [][6] = {"00001", "00002"}; //write at addr 00001, read at addr 00002
+const PROGMEM byte addresses [][6] = {"00001", "00002"}; //write at addr 00001, read at addr 00002
 //Send 6 bytes (because each int is 2 bytes) per rx/tx
 /*Data structure:
 First int is command number
@@ -133,7 +133,7 @@ typedef enum {
 double dataRx[3];
 double dataTx[3];
 unsigned long prevHBMillis = 0;
-const int HBInterval = 125; //send a heartbeat every 125ms, 8x per second
+#define HBInterval 125 //send a heartbeat every 125ms, 8x per second
 boolean radioListening = false;
 
 void setup() {
