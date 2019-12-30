@@ -26,7 +26,7 @@ boolean throttleEnabled = false;
 boolean oldThrottleEnabled = false;
 boolean boostEnabled = false;
 boolean oldBoostEnabled = false;
-boolean updateDisplay = false;
+boolean updateDisplayFlag = false;
 int ledMode = -1;
 int oldLedMode = -1;
 
@@ -41,11 +41,19 @@ boolean toneActive = false;
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 // Defining the type of display used (128x64)
-U8G2_SSD1305_128X64_ADAFRUIT_2_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE); //No rotation
+U8G2_SSD1306_128X64_NONAME_2_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE); //No rotation
 unsigned long prevDispUpdateMillis = 0;
-int dispMinUpdate = 200; //minimum time between display updates in ms to make sure we don't update faster than what the screen can handle
-char displayBuffer[20];
+int dispMinUpdate = 20; //minimum time between display updates in ms to make sure we don't update faster than what the screen can handle
+
+typedef enum {
+  DISPU_FULL = 0,
+  DISPU_CONN_WAIT = 1,
+  DISPU_START = 2,
+  CLEAR = 3
+} DISPLAY_UPDATE_TYPES;
+
 String displayString;
+char displayBuffer[20];
 
 //All bitmaps are in XBM format
 const PROGMEM unsigned char logo_bits[] = {
@@ -160,8 +168,12 @@ typedef enum {
 double dataRx[3];
 double dataTx[3];
 unsigned long prevHBMillis = 0;
+unsigned long lastHBTime = 0; //time when heartbeat signal was last recieved
 #define HBInterval 125 //send a heartbeat every 125ms, 8x per second
+#define HBTimeoutMax 275 //max time between signals before board cuts the motors in ms
 boolean radioListening = false;
+boolean connected = false; //check if connected
+boolean oldConnected = false;
 
 void setup() {
   Serial.begin(9600);
@@ -190,7 +202,7 @@ void setup() {
 
   u8g2.setI2CAddress(0x3C);
   u8g2.begin(); //Initialize display
-  drawStartScreen();
+  updateDisplay(DISPU_START);
   
   Serial.println("OLED display: ok");
 
@@ -222,9 +234,7 @@ void loop() {
         radio.read(&dataRx, sizeof(dataRx));
         if (dataRx[0] == 200) { //200 is "heartbeat" signal
           Serial.println("Got first heartbeat signal from board");
-          //Play a silly pitch
-          asynchTone(880, 200); //tone, time
-          transitionState(1);
+          connected = true; //set connected flag
         }
       }
       break;
@@ -251,7 +261,7 @@ void loop() {
       if (throttle != prevThrottle) {
         //Update display
         if (abs(throttle-prevThrottle) > 3) { //because display updates are kinda annoying, try to prevent as many as we can. make sure difference is at least 3%
-          updateDisplay = true; //set display update flag for next timer cycle
+          updateDisplayFlag = true; //set display update flag for next timer cycle
           Serial.print("HallChgState:");
           Serial.println(throttle);
         }
@@ -289,7 +299,7 @@ void loop() {
       }
       if ((currentMillis - lastEnSWDebounceTime) > debounceDelay) { //give it time to settle
         if (throttleEnabled != oldThrottleEnabled) { //Ensure it's still actually different
-          updateDisplay = true; //set display update flag for next timer cycle
+          updateDisplayFlag = true; //set display update flag for next timer cycle
           Serial.print("ThrottleSWState:");
           Serial.println(throttleEnabled);
           
@@ -310,7 +320,7 @@ void loop() {
       }
       if ((currentMillis - lastBoostDebounceTime) > debounceDelay) { //give it time to settle
         if (boostEnabled != oldBoostEnabled) { //Ensure it's still actually different
-          updateDisplay = true; //set display update flag for next timer cycle
+          updateDisplayFlag = true; //set display update flag for next timer cycle
           Serial.print("BoostChgState:");
           Serial.println(boostEnabled);
           
@@ -335,7 +345,7 @@ void loop() {
 
         if (oldLedMode != ledMode) {
           //Update display
-          updateDisplay = true; //set display update flag for next timer cycle
+          updateDisplayFlag = true; //set display update flag for next timer cycle
           Serial.print("LEDChgState:");
           Serial.println(ledMode);
 
@@ -365,6 +375,8 @@ void loop() {
     resetDataRx();
     radio.read(&dataRx, sizeof(dataRx));
     switch ((int)dataRx[0]) {
+      case HEARTBEAT: //board -> remote heartbeats
+        lastHBTime = currentMillis;
       case SENDALLDATA:
         radioTransmitMode();
         resetDataTx();
@@ -393,7 +405,7 @@ void loop() {
         radio.write(&dataTx, sizeof(dataTx));
         break;
       case SCREENUPDATE:
-        updateDisplay = true; //set flag so as not to refresh too fast
+        updateDisplayFlag = true; //set flag so as not to refresh too fast
         break;
       case VESCDATA: //ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is fet temp, ID 4 is batt percent
         switch ((int)dataRx[1]) {
@@ -421,12 +433,19 @@ void loop() {
     }
   }
 
+  //Check if controller is still connected (hearbeat signal present within time?)
+  connected = (currentMillis-lastHBTime >= HBTimeoutMax) ? false : true;
+  if (oldConnected != connected) { //only update on change
+    updateDisplayFlag = true;
+  }
+  oldConnected = connected;
+
   //Perform display update if enough time has elapsed
-  if (currentMillis-prevDispUpdateMillis >= dispMinUpdate && updateDisplay) {
-    updateDisplay = false;
+  if (currentMillis-prevDispUpdateMillis >= dispMinUpdate && updateDisplayFlag) {
+    updateDisplayFlag = false;
     prevDispUpdateMillis = currentMillis;
     
-    updateDisplay();
+    updateDisplay(DISPU_FULL);
   }
 
   //End tone if it's expired
@@ -452,37 +471,173 @@ void transitionState(int newState) {
   Serial.println(newState);
   switch (newState) {
     case 0:
-      // oled.clear();
-      // oled.set2X();
-      // oled.println("Waiting for");
-      // oled.println("connection");
-      // oled.println("...");
+      updateDisplay(DISPU_CONN_WAIT);
       break;
     case 1:
-      oledUpdateDisplay();
+      updateDisplay(DISPU_FULL);
       break;
   }  
 }
 
-void drawStartScreen() {
+void updateDisplay(DISPLAY_UPDATE_TYPES d) { //A lot of help for this: https://github.com/olikraus/u8glib/wiki/tpictureloop and this http://henrysbench.capnfatz.com/henrys-bench/u8glib-graphics-library-user-guide/u8glib-arduino-oled-tutorial-1-hello-world-on-steroids/
+  //draw throttle, page, batt, signal
   u8g2.firstPage();
   do {
-    u8g2.drawXBM(4, 4, 24, 24, logo_bits);
+    switch (d) {
+      case DISPU_FULL:
+        int x, y = 0;
+        /*
+        * BATTERY LEVEL
+        */
 
-    displayString = "EskateOS V2";
-    displayString.toCharArray(displayBuffer, 12);
-    u8g2.setFont(u8g2_font_helvR10_tr);
-    u8g2.drawStr(34, 22, displayBuffer);
+        // Position on OLED
+        x = 108; y = 4;
 
-    displayString = "By Aaron Becker";
-    displayString.toCharArray(displayBuffer, 16);
-    u8g2.drawStr(5, 44, displayBuffer);
+        u8g2.drawFrame(x + 2, y, 18, 9);
+        u8g2.drawBox(x, y + 2, 2, 5);
+
+        for (int i = 0; i < 5; i++) {
+          int p = round((100 / 5) * i);
+          if (p <= vesc_values_realtime.battPercent)
+          {
+            u8g2.drawBox(x + 4 + (3 * i), y + 2, 2, 5);
+          }
+        }
+
+        /*
+        * SIGNAL INDICATOR
+        */
+        x = 114; y = 17;
+
+        if (connected == true) {
+          if (throttleEnabled) {
+            u8g2.drawXBM(x, y, 12, 12, signal_transmitting_bits);
+          } else {
+            u8g2.drawXBM(x, y, 12, 12, signal_connected_bits);
+          }
+        } else {
+          u8g2.drawXBM(x, y, 12, 12, signal_noconnection_bits);
+        }
+
+        /*
+        * THROTTLE INDICATOR
+        */
+        x = 0;
+        y = 18;
+
+        // Draw throttle
+        u8g2.drawHLine(x, y, 52);
+        u8g2.drawVLine(x, y, 10);
+        u8g2.drawVLine(x + 52, y, 10);
+        u8g2.drawHLine(x, y + 10, 5);
+        u8g2.drawHLine(x + 52 - 4, y + 10, 5);
+
+        if (throttle >= 127) {
+          int width = map(throttle, 127, 255, 0, 49);
+
+          for (int i = 0; i < width; i++) {
+            u8g2.drawVLine(x + i + 2, y + 2, 7);
+          }
+        } else {
+          int width = map(throttle, 0, 126, 49, 0);
+          for (int i = 0; i < width; i++) {
+            u8g2.drawVLine(x + 50 - i, y + 2, 7);
+          }
+        }
+
+        /*
+        * VESC DATA INDICATOR
+        */
+
+        x = 0;
+        y = 0;
+        String prefix;
+        String suffix;
+        float value;
+        int decimals;
+        int first, last;
+
+        for (int i=0; i<4; i++) {
+          switch (i) {
+            case 0: //>--- Speed
+              prefix = "SPEED";
+              suffix = "KM/H";
+              value = vesc_values_realtime.speed;
+              decimals = 1;
+              break;
+            case 1: //>--- Distance
+              prefix = "DISTANCE";
+              suffix = "KM";
+              value = vesc_values_realtime.distanceTravelled;
+              decimals = 2;
+              break;
+            case 2: //>--- Batt Voltage
+              prefix = "BATTV";
+              suffix = "V";
+              value = vesc_values_realtime.inputVoltage;
+              decimals = 1;
+              break;
+            case 3: //>--- Mosfet Temp (VESC)
+              prefix = "FTEMP";
+              suffix = "F";
+              value = vesc_values_realtime.temp;
+              decimals = 2;
+              break;
+          }
+
+          // Display prefix (title)
+          displayString = prefix;
+          displayString.toCharArray(displayBuffer, 10);
+          u8g2.setFont(u8g2_font_profont12_tr);
+          u8g2.drawStr(x, y - 1, displayBuffer);
+
+          // Split up the float value: a number, b decimals.
+          first = abs(floor(value));
+          last = value * pow(10, 3) - first * pow(10, 3);
+
+          // Add leading zero
+          if (first <= 9) {
+            displayString = "0" + (String)first;
+          } else {
+            displayString = (String)first;
+          }
+
+          // Display numbers
+          displayString.toCharArray(displayBuffer, 10);
+          u8g2.setFont(u8g2_font_logisoso22_tn);
+          u8g2.drawStr(x + 55, y + 13, displayBuffer);
+
+          // Display decimals
+          displayString = "." + (String)last;
+          displayString.toCharArray(displayBuffer, decimals + 2);
+          u8g2.setFont(u8g2_font_profont12_tr);
+          u8g2.drawStr(x + 86, y - 1, displayBuffer);
+
+          // Display suffix
+          displayString = suffix;
+          displayString.toCharArray(displayBuffer, 10);
+          u8g2.setFont(u8g2_font_profont12_tr);
+          u8g2.drawStr(x + 86 + 2, y + 13, displayBuffer);
+
+          y+=16;
+        }
+        break;
+      case DISPU_CONN_WAIT:
+        u8g2.setFont(u8g2_font_helvR10_tr);
+        u8g2.drawStr(0, 13, "Waiting for");
+        u8g2.drawStr(0, 26, "Connection...");
+        break;
+      case DISPU_START:
+          u8g2.setFont(u8g2_font_helvR10_tr);
+          u8g2.drawXBM(4, 4, 24, 24, logo_bits);
+          u8g2.drawStr(34, 22, "EskateOS V2");
+          u8g2.drawStr(5, 44, "By Aaron Becker");
+        break;
+      case CLEAR:
+      default:
+        break;
+    }
   } while ( u8g2.nextPage() );
-}
-
-void updateDisplay() {
-  //draw throttle, page, batt, signal
-  
 }
 
 void radioRecieveMode() {

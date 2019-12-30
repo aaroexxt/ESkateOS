@@ -115,7 +115,7 @@ typedef enum {
 
 double dataRx[3]; //double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes
 double dataTx[3];
-unsigned long prevHBMillis = 0;
+unsigned long lastHBTime = 0; //time when heartbeat signal was last recieved
 #define HBTimeoutMax 275 //max time between signals before board cuts the motors in ms
 boolean radioListening = false;
 
@@ -192,7 +192,7 @@ void loop() {
           dataTx[2] = 200; //time
           radio.write(&dataTx, sizeof(dataTx)); //send pitch command
 
-          prevHBMillis = millis();
+          lastHBTime = millis();
           transitionState(1);
         }
       }
@@ -234,7 +234,7 @@ void loop() {
             dataTx[0] = HEARTBEAT;
             radio.write(&dataTx, sizeof(dataTx));
 
-            prevHBMillis = millis();
+            lastHBTime = millis();
             break;
         }
       }
@@ -253,7 +253,7 @@ void loop() {
           dataTx[0] = SENDALLDATA; //Set sendAllData flag (SAD flag) on controller to poll all values
           radio.write(&dataTx, sizeof(dataTx));
           
-          prevHBMillis = millis();
+          lastHBTime = millis();
           transitionState(1); //go back to normal operation
         }
       }
@@ -302,7 +302,7 @@ void loop() {
     }
   }
 
-  if (currentMillis-prevHBMillis>=HBTimeoutMax && MASTER_STATE == 1) { //have we lost connection with the controller while operating normally? welp then we should prolly cut motors
+  if (currentMillis-lastHBTime>=HBTimeoutMax && MASTER_STATE == 1) { //have we lost connection with the controller while operating normally? welp then we should prolly cut motors
     transitionState(2);
   }
 
