@@ -177,7 +177,7 @@ boolean oldConnected = false;
 
 void setup() {
   Serial.begin(9600);
-  Serial.println("Eskate controller setup begin");
+  Serial.println(F("Eskate controller setup begin"));
 
   pinMode(HALLEFFECT, INPUT);
   pinMode(THROTT_ENABLE_SW, INPUT_PULLUP);
@@ -186,15 +186,15 @@ void setup() {
   pinMode(BOOST_SW, INPUT_PULLUP);
   pinMode(LED_1_SW, INPUT_PULLUP);
   pinMode(LED_2_SW, INPUT_PULLUP);
-  Serial.println("Pin conf: ok");
+  Serial.println(F("Pin conf: ok"));
 
   if (!tsl.begin()) {
-    Serial.println("Lux sensor: failed :(");
+    Serial.println(F("Lux sensor: failed :("));
     while(1){}
   }
   tsl.setGain(TSL2561_GAIN_16X); //enable high gain to retain good performance in the dark
   tsl.setIntegrationTime(TSL2561_INTEGRATIONTIME_13MS);
-  Serial.println("Lux sensor: ok");
+  Serial.println(F("Lux sensor: ok"));
 
   //Setup Wire lib
   Wire.begin();
@@ -204,11 +204,11 @@ void setup() {
   u8g2.begin(); //Initialize display
   updateDisplay(DISPU_START);
   
-  Serial.println("OLED display: ok");
+  Serial.println(F("OLED display: ok"));
 
   //Setup radio
   if (!radio.begin()) {
-    Serial.println("Radio: failed :(");
+    Serial.println(F("Radio: failed :("));
     while(1){}
   }
   radio.setPALevel(RF24_PA_MAX); //max because we don't want to lose connection
@@ -217,7 +217,7 @@ void setup() {
   radio.openWritingPipe(addresses[0]);
   radio.openReadingPipe(1, addresses[1]); //set address to recieve data
   radioTransmitMode();
-  Serial.println("Setup radio: ok");
+  Serial.println(F("Setup radio: ok"));
 
   delay(1500); //keep splash screen up for a bit
   transitionState(0); //make sure to call transitionState to update screen
@@ -233,7 +233,7 @@ void loop() {
       if (radio.available()) {
         radio.read(&dataRx, sizeof(dataRx));
         if (dataRx[0] == 200) { //200 is "heartbeat" signal
-          Serial.println("Got first heartbeat signal from board");
+          Serial.println(F("Got first heartbeat signal from board"));
           connected = true; //set connected flag
         }
       }
@@ -260,9 +260,9 @@ void loop() {
       }
       if (throttle != prevThrottle) {
         //Update display
-        if (abs(throttle-prevThrottle) > 3) { //because display updates are kinda annoying, try to prevent as many as we can. make sure difference is at least 3%
+        if (abs(throttle-prevThrottle) > 5) { //because display updates are kinda annoying, try to prevent as many as we can. make sure difference is at least 5
           updateDisplayFlag = true; //set display update flag for next timer cycle
-          Serial.print("HallChgState:");
+          Serial.print(F("HallChgState:"));
           Serial.println(throttle);
         }
 
@@ -300,7 +300,7 @@ void loop() {
       if ((currentMillis - lastEnSWDebounceTime) > debounceDelay) { //give it time to settle
         if (throttleEnabled != oldThrottleEnabled) { //Ensure it's still actually different
           updateDisplayFlag = true; //set display update flag for next timer cycle
-          Serial.print("ThrottleSWState:");
+          Serial.print(F("ThrottleSWState:"));
           Serial.println(throttleEnabled);
           
           //Now send the data since there's been an update
@@ -321,7 +321,7 @@ void loop() {
       if ((currentMillis - lastBoostDebounceTime) > debounceDelay) { //give it time to settle
         if (boostEnabled != oldBoostEnabled) { //Ensure it's still actually different
           updateDisplayFlag = true; //set display update flag for next timer cycle
-          Serial.print("BoostChgState:");
+          Serial.print(F("BoostChgState:"));
           Serial.println(boostEnabled);
           
           //Now send the data since there's been an update
@@ -346,7 +346,7 @@ void loop() {
         if (oldLedMode != ledMode) {
           //Update display
           updateDisplayFlag = true; //set display update flag for next timer cycle
-          Serial.print("LEDChgState:");
+          Serial.print(F("LEDChgState:"));
           Serial.println(ledMode);
 
           //Now send the data since there's been an update
@@ -467,7 +467,7 @@ void asynchTone(int pitch, int time) { //time in ms
 
 void transitionState(int newState) {
   MASTER_STATE = newState;
-  Serial.print("New state: ");
+  Serial.print(F("New state: "));
   Serial.println(newState);
   switch (newState) {
     case 0:
@@ -560,26 +560,26 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) { //A lot of help for this: https://g
         for (int i=0; i<4; i++) {
           switch (i) {
             case 0: //>--- Speed
-              prefix = "SPEED";
-              suffix = "KM/H";
+              prefix = F("SPEED");
+              suffix = F("KM/H");
               value = vesc_values_realtime.speed;
               decimals = 1;
               break;
             case 1: //>--- Distance
-              prefix = "DISTANCE";
-              suffix = "KM";
+              prefix = F("DISTANCE");
+              suffix = F("KM");
               value = vesc_values_realtime.distanceTravelled;
               decimals = 2;
               break;
             case 2: //>--- Batt Voltage
-              prefix = "BATTV";
-              suffix = "V";
+              prefix = F("BATTV");
+              suffix = F("V");
               value = vesc_values_realtime.inputVoltage;
               decimals = 1;
               break;
             case 3: //>--- Mosfet Temp (VESC)
-              prefix = "FTEMP";
-              suffix = "F";
+              prefix = F("FTEMP");
+              suffix = F("F");
               value = vesc_values_realtime.temp;
               decimals = 2;
               break;
