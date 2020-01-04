@@ -15,10 +15,20 @@
 #include <Wire.h>
 #include <FastLED.h>
 #include <RF24.h>
-#include <vesc.h> //Thank you to Gian Marcov for this awesome library: https://github.com/gianmarcov/arduino_vesc. Modified by me (Aaron Becker) to use SoftwareSerial instead of HardwareSerial
-#include <SoftwareSerial.h>
+#include <VescUart.h> //Thank you to Gian Marcov for this awesome library: https://github.com/gianmarcov/arduino_vesc. Modified by me (Aaron Becker) to use SoftwareSerial instead of HardwareSerial
 
-//PIN DEFS
+//Debug stuff (incompatible with vesc)
+
+//#define DEBUG
+
+
+#ifdef DEBUG
+  #define DEBUG_PRINT(x)  Serial.println (x)
+  #include "printf.h"
+#else
+  #define DEBUG_PRINT(x)
+#endif
+
 
 //ESC pins
 ServoTimer2 ESC_LEFT; //Create FSESC "servo" output
@@ -40,11 +50,7 @@ unsigned long prevSpeedMillis = 0;
 boolean throttleEnabled = false;
 boolean boostEnabled = false;
 
-//VESC pins/defs
-#define VESC_UART_RX A0
-#define VESC_UART_TX A1
-SoftwareSerial vescSerial(VESC_UART_RX, VESC_UART_TX); //RX, TX
-Vesc VUART; //instantiate vescUart object
+VescUart VUART;
 float VRATIO_RPM_SPEED;
 float VRATIO_TACHO_KM;
 float VBATT_MAX;
@@ -125,37 +131,47 @@ int MASTER_STATE = 0;
 void setup() {
   while (!Serial){;}
 
-  Serial.begin(9600);
-  Serial.println(F("ESKATEINIT_setup begin"));
+  Serial.begin(115200);
+  DEBUG_PRINT(F("ESKATEINIT_setup begin"));
 
   //Setup ESC
   ESC_LEFT.attach(ESC_L_PIN);
   ESC_RIGHT.attach(ESC_R_PIN);
   ESC_LEFT.write(realPPM); //set them to be basically off (middle position)
   ESC_RIGHT.write(realPPM);
-  Serial.println(F("Setup esc: ok"));
+  DEBUG_PRINT(F("Setup esc: ok"));
 
   //Setup LEDS
   FastLED.addLeds<LED_TYPE,LED_DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(LED_BRIGHTNESS);
   FastLED.clear();
   for (int i=0; i<NUM_LEDS; i++) {
-    leds[i] = CRGB::Black; //set all leds to be off
+    leds[i] = CRGB::White; //set all leds to be off
   }
   FastLED.show();
-  Serial.println(F("Setup leds: ok"));
+  DEBUG_PRINT(F("Setup leds: ok"));
 
   //Setup VESC UART
-  pinMode(VESC_UART_TX, OUTPUT); //Set pins correct direction
-  pinMode(VESC_UART_RX, INPUT);
-  vescSerial.begin(115200);
-  while (!vescSerial) {;}
-  VUART.init(&vescSerial, &Serial); //Serial for debug port, vescSerial for communciations
-  delay(50);
+  DEBUG_PRINT(F("bef vesc init"));
+  VUART.setSerialPort(&Serial);
+  DEBUG_PRINT(F("aft vesc init"));
+  delay(6000);
+  if (VUART.getVescValues()) {
+    for (int i=0; i<NUM_LEDS; i++) {
+      leds[i] = CRGB::Blue; //set led to be green to indicate success vesc
+    }
+    FastLED.show();
+  } else {
+    for (int i=0; i<NUM_LEDS; i++) {
+      leds[i] = CRGB::Red; //set led to be red to indicate failure vesc
+    }
+    FastLED.show();
+  }
+  delay(500);
 
   calculateRatios();
 
-  Serial.println(F("Setup VESC: ok")); //TODO add check if it's null or 0 so it can fail properly
+  DEBUG_PRINT(F("Setup VESC: ok")); //TODO add check if it's null or 0 so it can fail properly
 
   //Setup radio
   radio.begin();
@@ -165,9 +181,9 @@ void setup() {
   radio.openWritingPipe(addresses[1]);
   radio.openReadingPipe(1, addresses[0]); //set address to recieve data
   radioRecieveMode();
-  Serial.println(F("Setup radio: ok"));
+  DEBUG_PRINT(F("Setup radio: ok"));
 
-  transitionState(0);
+  transitionState(1);
 }
 
 void loop() {
@@ -178,7 +194,7 @@ void loop() {
       if (radio.available()) {
         radio.read(&dataRx, sizeof(dataRx));
         if (dataRx[0] == HEARTBEAT) { //200 is "heartbeat" signal
-          Serial.println(F("Got first heartbeat signal from controller; we're go"));
+          DEBUG_PRINT(F("Got first heartbeat signal from controller; we're go"));
           ledState = 0; //Make sure LEDs are off
 
           radioTransmitMode();
@@ -203,12 +219,12 @@ void loop() {
         resetDataRx();
         radio.read(&dataRx, sizeof(dataRx));
         /*if (dataRx[0] != HEARTBEAT) {
-          Serial.print("Got event #: ");
-          Serial.print(dataRx[0]);
-          Serial.print(", value1: ");
-          Serial.print(dataRx[1]);
-          Serial.print(", value2: ");
-          Serial.println(dataRx[2]);
+          DEBUG_PRINT("Got event #: ");
+          DEBUG_PRINT(dataRx[0]);
+          DEBUG_PRINT(", value1: ");
+          DEBUG_PRINT(dataRx[1]);
+          DEBUG_PRINT(", value2: ");
+          DEBUG_PRINT(dataRx[2]);
         }*/
         switch ((int)dataRx[0]) {
           case THROTTLE_VAL: //1 is throttle update
@@ -228,7 +244,7 @@ void loop() {
             }
             break;
           case HEARTBEAT: //heartbeat. if we get one, we should send one
-            // Serial.println("controller hb recieved");
+            // DEBUG_PRINT("controller hb recieved");
             radioTransmitMode();
             resetDataTx();
             dataTx[0] = HEARTBEAT;
@@ -245,7 +261,7 @@ void loop() {
       if (radio.available()) {
         radio.read(&dataRx, sizeof(dataRx));
         if (dataRx[0] == HEARTBEAT) { //200 is "heartbeat" signal
-          Serial.println(F("Got heartbeat signal from controller after disconnection"));
+          DEBUG_PRINT(F("Got heartbeat signal from controller after disconnection"));
           ledState = 0; //Make sure LEDs are off
 
           radioTransmitMode();
@@ -259,7 +275,7 @@ void loop() {
       }
       break;
     default:
-      Serial.println(F("Undefined state; resetting"));
+      DEBUG_PRINT(F("Undefined state; resetting"));
       transitionState(0);
   }
 
@@ -303,34 +319,39 @@ void loop() {
   }
 
   if (currentMillis-lastHBTime>=HBTimeoutMax && MASTER_STATE == 1) { //have we lost connection with the controller while operating normally? welp then we should prolly cut motors
-    transitionState(2);
+    //transitionState(2);
   }
 
   if (currentMillis-prevVUpdateMillis >= VUpdateMillis && MASTER_STATE == 1) { //Time for VESC update
     prevVUpdateMillis = currentMillis;
     radioTransmitMode();
     resetDataTx();
-    //ID 12: VESC data [id, value]. ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is fet temp, ID 4 is batt percent
-    float distance = (float)VUART.getTachometerAbsValue()*VRATIO_TACHO_KM;
-    Serial.print(F("Distance travelled (tachometer): "));
-    Serial.println(String(distance));
+    //ID 12: VESC data [id, value]. ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is batt percent
+    float distance, speed, inpVoltage, battPercent;
 
-    float speed = (float)VUART.getRPM()*VRATIO_RPM_SPEED;
-    Serial.print(F("Current speed (rpm): "));
-    Serial.println(String(speed));
+    if (VUART.getVescValues()) {
+      distance = (float)VUART.data.tachometerAbs*VRATIO_TACHO_KM;
+      DEBUG_PRINT(F("Distance travelled (tachometer): "));
+      DEBUG_PRINT(String(distance));
 
-    float fetT = VUART.getFetTemperature();
-    Serial.print(F("Current FETTemp: "));
-    Serial.println(String(fetT));
+      speed = (float)VUART.data.rpm*VRATIO_RPM_SPEED;
+      DEBUG_PRINT(F("Current speed (rpm): "));
+      DEBUG_PRINT(String(speed));
 
-    float inpVoltage = VUART.getInputVoltage();
-    Serial.print(F("Current inpVoltage: "));
-    Serial.println(String(inpVoltage));
+      inpVoltage = (float)VUART.data.inpVoltage;
+      DEBUG_PRINT(F("Current inpVoltage: "));
+      DEBUG_PRINT(String(inpVoltage));
 
-    float battPercent = mapFloat(inpVoltage, VBATT_MIN, VBATT_MAX, 0, 100);
-    battPercent = (battPercent < VBATT_MIN) ? VBATT_MIN : (battPercent > VBATT_MAX) ? VBATT_MAX : battPercent;
-    Serial.print(F("Current battPercent: "));
-    Serial.println(String(battPercent));
+      battPercent = mapFloat(inpVoltage, VBATT_MIN, VBATT_MAX, 0, 100);
+      battPercent = (battPercent < VBATT_MIN) ? VBATT_MIN : (battPercent > VBATT_MAX) ? VBATT_MAX : battPercent;
+      DEBUG_PRINT(F("Current battPercent: "));
+      DEBUG_PRINT(String(battPercent));
+    } else {
+      distance = -1.0;
+      speed = -1.0;
+      inpVoltage = -1.0;
+      battPercent = -1.0;
+    }
 
     dataTx[0] = 12;
     dataTx[1] = 0;
@@ -346,10 +367,6 @@ void loop() {
     radio.write(&dataTx, sizeof(dataTx)); 
 
     dataTx[1] = 3;
-    dataTx[2] = fetT;
-    radio.write(&dataTx, sizeof(dataTx));
-
-    dataTx[1] = 4;
     dataTx[2] = battPercent;
     radio.write(&dataTx, sizeof(dataTx));     
   }
@@ -364,18 +381,23 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
 }
 
 void calculateRatios() { //seperate function to save ram
-  mc_configuration VCONFIG = VUART.getMotorConfiguration(); //takes all data directly from VESC
-  float gearRatio = VCONFIG.si_gear_ratio;
-  int wheelDiameter = VCONFIG.si_wheel_diameter;
-  int motorPoles = VCONFIG.si_motor_poles;
-  int batteryCells = VCONFIG.si_battery_cells;
+  // DEBUG_PRINT("vuart MC begin");
+  // mc_configuration VCONFIG = VUART.getMotorConfiguration(); //takes all data directly from VESC
+  // float gearRatio = VCONFIG.si_gear_ratio;
+  // int wheelDiameter = VCONFIG.si_wheel_diameter;
+  // int motorPoles = VCONFIG.si_motor_poles;
+  // int batteryCells = VCONFIG.si_battery_cells;
+  // DEBUG_PRINT("vuart MC done");
 
-  vesc_version VVERSION = VUART.getFirmwareVersion();
-  Serial.println(F("VESC Connection---"));
-  Serial.print(F("FW major: "));
-  Serial.println(String(VVERSION.major));
-  Serial.print(F("FW minor: "));
-  Serial.println(String(VVERSION.minor));
+
+  //Hardcoded lol because oof old vesc library
+  int motorPulley = 36;
+  int wheelPulley = 14;
+  float gearRatio = (float)motorPulley / (float)wheelPulley;
+  int wheelDiameter = 87;
+  int motorPoles = 14;
+  int batteryCells = 10;
+  DEBUG_PRINT("Vrat: hard ok");
 
   //The following code yoinked basically directly from https://github.com/SolidGeek/nRF24-Esk8-Remote/blob/master/transmitter/transmitter.ino. Thanks SolidGeek :)
   VRATIO_RPM_SPEED = (gearRatio * 60.0 * (float)wheelDiameter * 3.14156) / (((float)motorPoles / 2.0) * 1000000.0); // ERPM to Km/h
@@ -386,8 +408,8 @@ void calculateRatios() { //seperate function to save ram
 
 void transitionState(int newState) {
   MASTER_STATE = newState;
-  Serial.print("New state: ");
-  Serial.println(newState);
+  DEBUG_PRINT("New state: ");
+  DEBUG_PRINT(newState);
   switch (newState) {
     case 1:
       if (ledState == 0) { //enable/disable the leds based on what's going on
@@ -396,7 +418,7 @@ void transitionState(int newState) {
       }
       break;
     case 2: //uhoh we are going into remote disconnect mode
-      Serial.println(F("Uhoh we've lost connection to the remote :("));
+      DEBUG_PRINT(F("Uhoh we've lost connection to the remote :("));
       ledState = 1; //go back into disconnected mode
       realPPM = ESC_STOP; //set target to 0 speed to bring us back down to 0 speed
       break;

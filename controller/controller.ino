@@ -118,7 +118,6 @@ int debounceDelay = 50;
 struct VREALTIME {
   float speed;
   float distanceTravelled;
-  float temp;
   float inputVoltage;
   float battPercent;
 };
@@ -407,7 +406,7 @@ void loop() {
       case SCREENUPDATE:
         updateDisplayFlag = true; //set flag so as not to refresh too fast
         break;
-      case VESCDATA: //ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is fet temp, ID 4 is batt percent
+      case VESCDATA: //ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is batt percent
         switch ((int)dataRx[1]) {
           case 0:
             vesc_values_realtime.speed = dataRx[2];
@@ -419,9 +418,6 @@ void loop() {
             vesc_values_realtime.inputVoltage = dataRx[2];
             break;
           case 3:
-            vesc_values_realtime.temp = dataRx[2];
-            break;
-          case 4:
             vesc_values_realtime.battPercent = dataRx[2];
             break;
         }
@@ -557,7 +553,7 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) { //A lot of help for this: https://g
         int decimals;
         int first, last;
 
-        for (int i=0; i<4; i++) {
+        for (int i=0; i<3; i++) {
           switch (i) {
             case 0: //>--- Speed
               prefix = F("SPEED");
@@ -577,12 +573,12 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) { //A lot of help for this: https://g
               value = vesc_values_realtime.inputVoltage;
               decimals = 1;
               break;
-            case 3: //>--- Mosfet Temp (VESC)
-              prefix = F("FTEMP");
-              suffix = F("F");
-              value = vesc_values_realtime.temp;
-              decimals = 2;
-              break;
+            // case 3: //>--- Mosfet Temp (VESC)
+            //   prefix = F("FTEMP");
+            //   suffix = F("F");
+            //   value = vesc_values_realtime.temp;
+            //   decimals = 2;
+            //   break;
           }
 
           // Display prefix (title)
