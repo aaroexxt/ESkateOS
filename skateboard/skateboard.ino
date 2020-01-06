@@ -19,7 +19,7 @@
 
 //Debug stuff (incompatible with vesc)
 
-//#define DEBUG
+#define DEBUG
 
 
 #ifdef DEBUG
@@ -41,10 +41,9 @@ ServoTimer2 ESC_RIGHT; //Create FSESC "servo" output
 #define ESC_MAX 2000
 #define ESC_STOP 1400 //(ESC_MIN+ESC_MAX)/2;
 
-#define JOY_MIN 0
-#define JOY_MAX 880
+#define HALL_MIN 0
+#define HALL_MAX 255
 int realPPM = ESC_STOP;
-int targetPPM = ESC_STOP;
 int realRAW = 0;
 unsigned long prevSpeedMillis = 0;
 boolean throttleEnabled = false;
@@ -81,7 +80,7 @@ int ledState = 1;
 
 //Radio pins/defs
 RF24 radio(7, 8);
-const PROGMEM byte addresses [][6] = {"00001", "00002"}; //write at addr 00002, read at addr 00001
+const byte addresses [][6] = {"00001", "00002"}; //write at addr 00002, read at addr 00001
 //Send 6 bytes (because each int is 2 bytes) per rx/tx
 /*Data structure:
 First int is command number
@@ -122,7 +121,7 @@ typedef enum {
 double dataRx[3]; //double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes
 double dataTx[3];
 unsigned long lastHBTime = 0; //time when heartbeat signal was last recieved
-#define HBTimeoutMax 275 //max time between signals before board cuts the motors in ms
+#define HBTimeoutMax 750 //max time between signals before board cuts the motors in ms
 boolean radioListening = false;
 
 //General pins/defs
@@ -155,7 +154,7 @@ void setup() {
   DEBUG_PRINT(F("bef vesc init"));
   VUART.setSerialPort(&Serial);
   DEBUG_PRINT(F("aft vesc init"));
-  delay(6000);
+  delay(3500);
   if (VUART.getVescValues()) {
     for (int i=0; i<NUM_LEDS; i++) {
       leds[i] = CRGB::Blue; //set led to be green to indicate success vesc
@@ -183,7 +182,7 @@ void setup() {
   radioRecieveMode();
   DEBUG_PRINT(F("Setup radio: ok"));
 
-  transitionState(1);
+  transitionState(0);
 }
 
 void loop() {
@@ -204,7 +203,7 @@ void loop() {
 
           delay(200);
           dataTx[0] = TONE;
-          dataTx[1] = 250; //tone
+          dataTx[1] = 2550; //tone (g)
           dataTx[2] = 200; //time
           radio.write(&dataTx, sizeof(dataTx)); //send pitch command
 
@@ -212,12 +211,16 @@ void loop() {
           transitionState(1);
         }
       }
+
       break;
     case 1: //standard operation
       radioRecieveMode();
       if (radio.available()) {
         resetDataRx();
         radio.read(&dataRx, sizeof(dataRx));
+        if (dataRx[0] != 200) {
+          DEBUG_PRINT("RECV COMM ID: "+String(dataRx[0]));
+        }
         /*if (dataRx[0] != HEARTBEAT) {
           DEBUG_PRINT("Got event #: ");
           DEBUG_PRINT(dataRx[0]);
@@ -232,8 +235,10 @@ void loop() {
             break;
           case THROTTLE_SW:
             throttleEnabled = dataRx[1];
+            break;
           case BOOSTMODE:
             boostEnabled = dataRx[1];
+            break;
           case LEDMODE: //2 is led mode update
             if (dataRx[1] <= 3) { //sanity check
               if (dataRx[1] == 0) {
@@ -319,7 +324,7 @@ void loop() {
   }
 
   if (currentMillis-lastHBTime>=HBTimeoutMax && MASTER_STATE == 1) { //have we lost connection with the controller while operating normally? welp then we should prolly cut motors
-    //transitionState(2);
+    transitionState(2);
   }
 
   if (currentMillis-prevVUpdateMillis >= VUpdateMillis && MASTER_STATE == 1) { //Time for VESC update
@@ -426,31 +431,18 @@ void transitionState(int newState) {
 }
 
 void updateESC() {
-  if (abs(targetPPM-ESC_STOP) < 50) {
-    targetPPM = ESC_STOP;
+  if (abs(realPPM-ESC_STOP) < 50) {
+    realPPM = ESC_STOP;
   }
 
-  if (throttleEnabled) {
-    realRAW = constrain(realRAW, JOY_MIN, JOY_MAX); //constrain raw value
-    targetPPM = map(realRAW, JOY_MIN, JOY_MAX, ESC_MIN, (boostEnabled) ? ESC_MAX : ESC_NONBOOST_MAX); //calculate ppm
-    targetPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits for safety even tho it should never be an issue
+  if (throttleEnabled || true) {
+    realRAW = constrain(realRAW, HALL_MIN, HALL_MAX); //constrain raw value
+    realPPM = map(realRAW, HALL_MIN, HALL_MAX, ESC_MIN, (boostEnabled) ? ESC_MAX : ESC_NONBOOST_MAX); //calculate ppm
+    realPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits for safety even tho it should never be an issue
   } else {
-    targetPPM = ESC_STOP;
+    realPPM = ESC_STOP;
   }
 
-  unsigned long currentMillis = millis();
-  int deltaMillis = currentMillis-prevSpeedMillis; //ensure that acceleration rate is constant no matter what loop rate is
-  int deltaPPM = targetPPM-realPPM;
-    //RATE: 5 ppm/ms
-
-  if (targetPPM > realPPM) { //we need to go
-    realPPM += deltaMillis*5;//(targetPPM-realPPM)/20;
-  } else if (targetPPM < realPPM) { //brake faster!
-    realPPM -= deltaMillis*5;//(targetPPM-realPPM)/10;
-  }
-  prevSpeedMillis = currentMillis;
-
-  realPPM = constrain(realPPM, ESC_MIN, ESC_MAX);
   ESC_LEFT.write(realPPM); //write the values
   ESC_RIGHT.write(realPPM);
 }

@@ -32,6 +32,8 @@ int oldLedMode = -1;
 
 //PIN DEFS
 
+const bool displayVESCData = false;
+
 //Buzzer
 #define BUZZER_PIN 9
 unsigned long toneExpire = 0;
@@ -41,7 +43,7 @@ boolean toneActive = false;
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 // Defining the type of display used (128x64)
-U8G2_SSD1306_128X64_NONAME_2_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE); //No rotation
+U8G2_SSD1306_128X64_NONAME_1_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE); //No rotation
 unsigned long prevDispUpdateMillis = 0;
 int dispMinUpdate = 20; //minimum time between display updates in ms to make sure we don't update faster than what the screen can handle
 
@@ -98,7 +100,6 @@ int luxMinUpdate = 200;
 #define HALL_MIN 0
 #define HALL_MAX 1023
 #define HALL_CENTER (HALL_MIN+HALL_MAX)/2
-unsigned long lastEnSWDebounceTime = 0;
 
 int prevThrottle = THROTTLE_STOP;
 int throttle = THROTTLE_STOP;
@@ -108,11 +109,10 @@ int throttle = THROTTLE_STOP;
 
 //LED & boost pins
 #define BOOST_SW 3
-unsigned long lastBoostDebounceTime = 0;
 #define LED_1_SW 5
 #define LED_2_SW 4
 unsigned long lastLEDDebounceTime = 0;
-int debounceDelay = 50;
+#define debounceDelay 50
 
 //Vesc data
 struct VREALTIME {
@@ -125,7 +125,7 @@ struct VREALTIME vesc_values_realtime;
 
 //Radio pins/defs
 RF24 radio(7, 8);
-const PROGMEM byte addresses [][6] = {"00001", "00002"}; //write at addr 00001, read at addr 00002
+const byte addresses [][6] = {"00001", "00002"}; //write at addr 00001, read at addr 00002
 //Send 6 bytes (because each int is 2 bytes) per rx/tx
 /*Data structure:
 First int is command number
@@ -218,7 +218,12 @@ void setup() {
   radioTransmitMode();
   Serial.println(F("Setup radio: ok"));
 
-  delay(1500); //keep splash screen up for a bit
+  delay(1000); //keep splash screen up for a bit
+  asynchTone(3830, 100); //play a c note
+  delay(100);
+  asynchTone(3400, 100); //play a d note
+  delay(100);
+  asynchTone(3038, 100); //play a e note
   transitionState(0); //make sure to call transitionState to update screen
 }
 
@@ -234,6 +239,7 @@ void loop() {
         if (dataRx[0] == 200) { //200 is "heartbeat" signal
           Serial.println(F("Got first heartbeat signal from board"));
           connected = true; //set connected flag
+          transitionState(1);
         }
       }
       break;
@@ -294,44 +300,34 @@ void loop() {
 
       throttleEnabled = !digitalRead(THROTT_ENABLE_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
       if (throttleEnabled != oldThrottleEnabled) {
-        lastEnSWDebounceTime = currentMillis;
-      }
-      if ((currentMillis - lastEnSWDebounceTime) > debounceDelay) { //give it time to settle
-        if (throttleEnabled != oldThrottleEnabled) { //Ensure it's still actually different
-          updateDisplayFlag = true; //set display update flag for next timer cycle
-          Serial.print(F("ThrottleSWState:"));
-          Serial.println(throttleEnabled);
-          
-          //Now send the data since there's been an update
-          radioTransmitMode();
-          resetDataTx();
-          dataTx[0] = THROTTLE_SW; //sw update
-          dataTx[1] = (throttleEnabled) ? 1 : 0;
-          radio.write(&dataTx, sizeof(dataTx));
+        updateDisplayFlag = true; //set display update flag for next timer cycle
+        Serial.print(F("ThrottleEnChgState:"));
+        Serial.println(throttleEnabled);
+        
+        //Now send the data since there's been an update
+        radioTransmitMode();
+        resetDataTx();
+        dataTx[0] = THROTTLE_SW; //sw update
+        dataTx[1] = (throttleEnabled) ? 1 : 0;
+        radio.write(&dataTx, sizeof(dataTx));
 
-          oldThrottleEnabled = throttleEnabled;
-        }
+        oldThrottleEnabled = throttleEnabled;
       }
 
       boostEnabled = !digitalRead(BOOST_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
       if (boostEnabled != oldBoostEnabled) {
-        lastBoostDebounceTime = currentMillis;
-      }
-      if ((currentMillis - lastBoostDebounceTime) > debounceDelay) { //give it time to settle
-        if (boostEnabled != oldBoostEnabled) { //Ensure it's still actually different
-          updateDisplayFlag = true; //set display update flag for next timer cycle
-          Serial.print(F("BoostChgState:"));
-          Serial.println(boostEnabled);
-          
-          //Now send the data since there's been an update
-          radioTransmitMode();
-          resetDataTx();
-          dataTx[0] = BOOSTMODE; //boost update
-          dataTx[1] = (boostEnabled) ? 1 : 0;
-          radio.write(&dataTx, sizeof(dataTx));
+        updateDisplayFlag = true; //set display update flag for next timer cycle
+        Serial.print(F("BoostChgState:"));
+        Serial.println(boostEnabled);
+        
+        //Now send the data since there's been an update
+        radioTransmitMode();
+        resetDataTx();
+        dataTx[0] = BOOSTMODE; //boost update
+        dataTx[1] = (boostEnabled) ? 1 : 0;
+        radio.write(&dataTx, sizeof(dataTx));
 
-          oldBoostEnabled = boostEnabled;
-        }
+        oldBoostEnabled = boostEnabled;
       }
 
       int LEDReading1 = !digitalRead(LED_1_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
@@ -371,11 +367,13 @@ void loop() {
 
   radioRecieveMode(); //Check for any data from the board
   if (radio.available()) {
+    boolean vvNew = false;
     resetDataRx();
     radio.read(&dataRx, sizeof(dataRx));
     switch ((int)dataRx[0]) {
       case HEARTBEAT: //board -> remote heartbeats
         lastHBTime = currentMillis;
+        break;
       case SENDALLDATA:
         radioTransmitMode();
         resetDataTx();
@@ -410,15 +408,19 @@ void loop() {
         switch ((int)dataRx[1]) {
           case 0:
             vesc_values_realtime.speed = dataRx[2];
+            vvNew = true;
             break;
           case 1:
             vesc_values_realtime.distanceTravelled = dataRx[2];
+            vvNew = true;
             break;
           case 2:
             vesc_values_realtime.inputVoltage = dataRx[2];
+            vvNew = true;
             break;
           case 3:
             vesc_values_realtime.battPercent = dataRx[2];
+            vvNew = true;
             break;
         }
         break;
@@ -426,6 +428,13 @@ void loop() {
         asynchTone(dataRx[1], dataRx[2]); //Tone, time
         break;
 
+    }
+    if (vvNew && displayVESCData) {
+      Serial.println(F("New VESC data recieved\nSpeed:"));
+      Serial.println(String(vesc_values_realtime.speed));
+      Serial.println(String(vesc_values_realtime.distanceTravelled));
+      Serial.println(String(vesc_values_realtime.inputVoltage));
+      Serial.println(String(vesc_values_realtime.battPercent));
     }
   }
 
