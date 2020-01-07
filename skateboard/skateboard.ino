@@ -19,7 +19,7 @@
 
 //Debug stuff (incompatible with vesc)
 
-#define DEBUG
+//#define DEBUG
 
 
 #ifdef DEBUG
@@ -435,7 +435,7 @@ void updateESC() {
     realPPM = ESC_STOP;
   }
 
-  if (throttleEnabled || true) {
+  if (throttleEnabled) {
     realRAW = constrain(realRAW, HALL_MIN, HALL_MAX); //constrain raw value
     realPPM = map(realRAW, HALL_MIN, HALL_MAX, ESC_MIN, (boostEnabled) ? ESC_MAX : ESC_NONBOOST_MAX); //calculate ppm
     realPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits for safety even tho it should never be an issue

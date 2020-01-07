@@ -43,7 +43,7 @@ boolean toneActive = false;
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 // Defining the type of display used (128x64)
-U8G2_SSD1306_128X64_NONAME_1_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE); //No rotation
+U8G2_SSD1306_128X64_NONAME_2_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE); //No rotation
 unsigned long prevDispUpdateMillis = 0;
 int dispMinUpdate = 20; //minimum time between display updates in ms to make sure we don't update faster than what the screen can handle
 
@@ -56,9 +56,12 @@ typedef enum {
 
 String displayString;
 char displayBuffer[20];
+boolean displayStateOne = false;
+unsigned long lastDispStateOneTime = 0;
+#define displayStateOneChangeTime 4000
 
 //All bitmaps are in XBM format
-const PROGMEM unsigned char logo_bits[] = {
+const unsigned char logo_bits[] = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0x00, 0x80, 0x3c, 0x01,
   0xe0, 0x00, 0x07, 0x70, 0x18, 0x0e, 0x30, 0x18, 0x0c, 0x98, 0x99, 0x19,
   0x80, 0xff, 0x01, 0x04, 0xc3, 0x20, 0x0c, 0x99, 0x30, 0xec, 0xa5, 0x37,
@@ -67,17 +70,17 @@ const PROGMEM unsigned char logo_bits[] = {
   0x80, 0x3c, 0x01, 0x00, 0x7e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-const PROGMEM unsigned char signal_transmitting_bits[] = {
+const unsigned char signal_transmitting_bits[] = {
   0x18, 0x00, 0x0c, 0x00, 0xc6, 0x00, 0x66, 0x00, 0x23, 0x06, 0x33, 0x0f,
   0x33, 0x0f, 0x23, 0x06, 0x66, 0x00, 0xc6, 0x00, 0x0c, 0x00, 0x18, 0x00
 };
 
-const PROGMEM unsigned char signal_connected_bits[] = {
+const unsigned char signal_connected_bits[] = {
   0x18, 0x00, 0x0c, 0x00, 0xc6, 0x00, 0x66, 0x00, 0x23, 0x06, 0x33, 0x09,
   0x33, 0x09, 0x23, 0x06, 0x66, 0x00, 0xc6, 0x00, 0x0c, 0x00, 0x18, 0x00
 };
 
-const PROGMEM unsigned char signal_noconnection_bits[] = {
+const unsigned char signal_noconnection_bits[] = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x09,
   0x00, 0x09, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
@@ -169,7 +172,7 @@ double dataTx[3];
 unsigned long prevHBMillis = 0;
 unsigned long lastHBTime = 0; //time when heartbeat signal was last recieved
 #define HBInterval 125 //send a heartbeat every 125ms, 8x per second
-#define HBTimeoutMax 275 //max time between signals before board cuts the motors in ms
+#define HBTimeoutMax 750 //max time between signals before board cuts the motors in ms
 boolean radioListening = false;
 boolean connected = false; //check if connected
 boolean oldConnected = false;
@@ -196,12 +199,11 @@ void setup() {
   Serial.println(F("Lux sensor: ok"));
 
   //Setup Wire lib
-  Wire.begin();
-  Wire.setClock(400000L);
+  // Wire.begin();
+  // Wire.setClock(400000L);
 
-  u8g2.setI2CAddress(0x3C);
+  // u8g2.setI2CAddress(0x3C);
   u8g2.begin(); //Initialize display
-  updateDisplay(DISPU_START);
   
   Serial.println(F("OLED display: ok"));
 
@@ -218,7 +220,9 @@ void setup() {
   radioTransmitMode();
   Serial.println(F("Setup radio: ok"));
 
-  delay(1000); //keep splash screen up for a bit
+  updateDisplay(DISPU_START);
+  Serial.println(F("Start screen going up"));
+  delay(1500); //keep splash screen up for a bit
   asynchTone(3830, 100); //play a c note
   delay(100);
   asynchTone(3400, 100); //play a d note
@@ -446,7 +450,7 @@ void loop() {
   oldConnected = connected;
 
   //Perform display update if enough time has elapsed
-  if (currentMillis-prevDispUpdateMillis >= dispMinUpdate && updateDisplayFlag) {
+  if (currentMillis-prevDispUpdateMillis >= dispMinUpdate && (updateDisplayFlag || currentMillis-lastDispStateOneTime > displayStateOneChangeTime) && MASTER_STATE != 0) {
     updateDisplayFlag = false;
     prevDispUpdateMillis = currentMillis;
     
@@ -489,6 +493,17 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) { //A lot of help for this: https://g
   u8g2.firstPage();
   do {
     switch (d) {
+      case DISPU_CONN_WAIT:
+        u8g2.setFont(u8g2_font_helvB12_tr);
+        u8g2.drawStr(0, 13, "Waiting for");
+        u8g2.drawStr(0, 26, "Connection...");
+        break;
+      case DISPU_START:
+          u8g2.setFont(u8g2_font_helvR10_tr);
+          u8g2.drawXBM(4, 4, 24, 24, logo_bits);
+          u8g2.drawStr(34, 22, "EskateOS V2");
+          u8g2.drawStr(5, 44, "By Aaron Becker");
+        break;
       case DISPU_FULL:
         int x, y = 0;
         /*
@@ -528,7 +543,7 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) { //A lot of help for this: https://g
         * THROTTLE INDICATOR
         */
         x = 0;
-        y = 18;
+        y = 0;
 
         // Draw throttle
         u8g2.drawHLine(x, y, 52);
@@ -555,32 +570,38 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) { //A lot of help for this: https://g
         */
 
         x = 0;
-        y = 0;
+        y = 26;
         String prefix;
         String suffix;
         float value;
         int decimals;
         int first, last;
 
-        for (int i=0; i<3; i++) {
+        if (millis()-lastDispStateOneTime > displayStateOneChangeTime) {
+          displayStateOne = !displayStateOne;
+          lastDispStateOneTime = millis();
+        }
+
+        for (int i=0; i<2; i++) {
           switch (i) {
             case 0: //>--- Speed
               prefix = F("SPEED");
-              suffix = F("KM/H");
+              suffix = F("MPH");
               value = vesc_values_realtime.speed;
               decimals = 1;
               break;
             case 1: //>--- Distance
-              prefix = F("DISTANCE");
-              suffix = F("KM");
-              value = vesc_values_realtime.distanceTravelled;
-              decimals = 2;
-              break;
-            case 2: //>--- Batt Voltage
-              prefix = F("BATTV");
-              suffix = F("V");
-              value = vesc_values_realtime.inputVoltage;
-              decimals = 1;
+              if (displayStateOne) {
+                prefix = F("DISTANCE");
+                suffix = F("MI");
+                value = vesc_values_realtime.distanceTravelled;
+                decimals = 2;
+              } else { //>--- Batt Voltage
+                prefix = F("BATTV");
+                suffix = F("V");
+                value = vesc_values_realtime.inputVoltage;
+                decimals = 1;
+              }
               break;
             // case 3: //>--- Mosfet Temp (VESC)
             //   prefix = F("FTEMP");
@@ -624,19 +645,8 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) { //A lot of help for this: https://g
           u8g2.setFont(u8g2_font_profont12_tr);
           u8g2.drawStr(x + 86 + 2, y + 13, displayBuffer);
 
-          y+=16;
+          y+=25;
         }
-        break;
-      case DISPU_CONN_WAIT:
-        u8g2.setFont(u8g2_font_helvR10_tr);
-        u8g2.drawStr(0, 13, "Waiting for");
-        u8g2.drawStr(0, 26, "Connection...");
-        break;
-      case DISPU_START:
-          u8g2.setFont(u8g2_font_helvR10_tr);
-          u8g2.drawXBM(4, 4, 24, 24, logo_bits);
-          u8g2.drawStr(34, 22, "EskateOS V2");
-          u8g2.drawStr(5, 44, "By Aaron Becker");
         break;
       case CLEAR:
       default:
