@@ -93,7 +93,6 @@ ID 1: ThrottleVal update. Data: [raw value, 0]
 ID 2: ThrottleSW update. Data: [sw, 0]
 ID 3: LED mode update. Data: [ledMode (0, 1, 2), 0]
 ID 4: BOOST switch update. Data: [boostMode (0, 1), 0]
-ID 5: lux sensor update. Data: [luxVal, passingEnableThreshold (0, 1)]
 
 ID 10: Ask controller to send state of all peripherals
 ID 11: Controller force screen update
@@ -109,7 +108,6 @@ typedef enum {
   THROTTLE_SW = 2,
   LEDMODE = 3,
   BOOSTMODE = 4,
-  LUX_VAL = 5,
 
   //Board -> Controller
   SENDALLDATA = 10,

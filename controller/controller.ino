@@ -14,9 +14,6 @@
 #include <nRF24L01.h>
 #include <RF24.h>
 
-#include <Adafruit_Sensor.h>
-#include <Adafruit_TSL2561_U.h> //light sensor
-
 #include <SPI.h>
 #include <Wire.h>
 #include <U8g2lib.h>
@@ -85,13 +82,6 @@ const unsigned char signal_noconnection_bits[] = {
   0x00, 0x09, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-//TSL9521 Lux sensor
-Adafruit_TSL2561_Unified tsl = Adafruit_TSL2561_Unified(TSL2561_ADDR_FLOAT, 12345);
-#define LUX_ENABLE_THRESHOLD 20
-int oldLux = -1;
-unsigned long prevLuxUpdateMillis = 0;
-int luxMinUpdate = 200;
-
 //Throttle pins/setup
 #define HALLEFFECT A1
 #define THROTT_ENABLE_SW 6
@@ -142,7 +132,6 @@ ID 1: ThrottleVal update. Data: [raw value, 0]
 ID 2: ThrottleSW update. Data: [sw, 0]
 ID 3: LED mode update. Data: [ledMode (0, 1, 2), 0]
 ID 4: BOOST switch update. Data: [boostMode (0, 1), 0]
-ID 5: lux sensor update. Data: [luxVal, passingEnableThreshold (0, 1)]
 
 ID 10: Ask controller to send state of all peripherals
 ID 11: Controller force screen update
@@ -158,7 +147,6 @@ typedef enum {
   THROTTLE_SW = 2,
   LEDMODE = 3,
   BOOSTMODE = 4,
-  LUX_VAL = 5,
 
   //Board -> Controller
   SENDALLDATA = 10,
@@ -189,14 +177,6 @@ void setup() {
   pinMode(LED_1_SW, INPUT_PULLUP);
   pinMode(LED_2_SW, INPUT_PULLUP);
   Serial.println(F("Pin conf: ok"));
-
-  if (!tsl.begin()) {
-    Serial.println(F("Lux sensor: failed :("));
-    while(1){}
-  }
-  tsl.setGain(TSL2561_GAIN_16X); //enable high gain to retain good performance in the dark
-  tsl.setIntegrationTime(TSL2561_INTEGRATIONTIME_13MS);
-  Serial.println(F("Lux sensor: ok"));
 
   //Setup Wire lib
   // Wire.begin();
@@ -283,23 +263,6 @@ void loop() {
         radio.write(&dataTx, sizeof(dataTx));
 
         prevThrottle = throttle;
-      }
-
-      //Update peripherals - lux sensor, boost switch, led mode switch, throttle switch with debouncing
-      sensors_event_t event;
-      tsl.getEvent(&event);
-      if (event.light) { //make sure sensor isn't overloaded
-        if (oldLux != event.light && (currentMillis - prevLuxUpdateMillis) > luxMinUpdate) { //send lux to board if min time has elapsed
-          radioTransmitMode();
-          resetDataTx();
-          dataTx[0] = LUX_VAL; //lux update
-          dataTx[1] = event.light;
-          dataTx[2] = (event.light < LUX_ENABLE_THRESHOLD) ? 1 : 0;
-          radio.write(&dataTx, sizeof(dataTx));
-
-          prevLuxUpdateMillis = currentMillis;
-          oldLux = event.light;
-        }
       }
 
       throttleEnabled = !digitalRead(THROTT_ENABLE_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
@@ -394,11 +357,6 @@ void loop() {
         resetDataTx();
         dataTx[0] = THROTTLE_SW; //sw update
         dataTx[1] = (throttleEnabled) ? 1 : 0;
-        radio.write(&dataTx, sizeof(dataTx));
-        resetDataTx();
-        dataTx[0] = LUX_VAL; //lux update
-        dataTx[1] = oldLux;
-        dataTx[2] = (oldLux < LUX_ENABLE_THRESHOLD);
         radio.write(&dataTx, sizeof(dataTx));
         resetDataTx();
         dataTx[0] = THROTTLE_VAL; //throttle update
