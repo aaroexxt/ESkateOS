@@ -19,7 +19,7 @@
 
 //Debug stuff (incompatible with vesc)
 
-//#define DEBUG
+#define DEBUG
 
 
 #ifdef DEBUG
@@ -31,7 +31,6 @@
 
 
 //ESC pins
-ServoTimer2 ESC_LEFT; //Create FSESC "servo" output
 ServoTimer2 ESC_RIGHT; //Create FSESC "servo" output
 #define ESC_R_PIN 5
 #define ESC_L_PIN 6
@@ -39,10 +38,11 @@ ServoTimer2 ESC_RIGHT; //Create FSESC "servo" output
 #define ESC_MIN 800
 #define ESC_NONBOOST_MAX 1700
 #define ESC_MAX 2000
-#define ESC_STOP 1400 //(ESC_MIN+ESC_MAX)/2;
+#define ESC_STOP (ESC_MIN+ESC_MAX)/2
 
 #define HALL_MIN 0
 #define HALL_MAX 255
+#define HALL_STOP (HALL_MAX+HALL_MIN)/2
 int realPPM = ESC_STOP;
 int realRAW = 0;
 unsigned long prevSpeedMillis = 0;
@@ -52,6 +52,8 @@ boolean boostEnabled = false;
 VescUart VUART;
 float VRATIO_RPM_SPEED;
 float VRATIO_TACHO_KM;
+float VRATIO_KM_MI;
+const boolean unitsInKM = false; //are units in kilometers?
 float VBATT_MAX;
 float VBATT_MIN;
 unsigned long prevVUpdateMillis = 0;
@@ -132,10 +134,8 @@ void setup() {
   DEBUG_PRINT(F("ESKATEINIT_setup begin"));
 
   //Setup ESC
-  ESC_LEFT.attach(ESC_L_PIN);
   ESC_RIGHT.attach(ESC_R_PIN);
-  ESC_LEFT.write(realPPM); //set them to be basically off (middle position)
-  ESC_RIGHT.write(realPPM);
+  ESC_RIGHT.write(ESC_STOP);
   DEBUG_PRINT(F("Setup esc: ok"));
 
   //Setup LEDS
@@ -152,17 +152,19 @@ void setup() {
   DEBUG_PRINT(F("bef vesc init"));
   VUART.setSerialPort(&Serial);
   DEBUG_PRINT(F("aft vesc init"));
-  delay(3500);
+  delay(4500);
   if (VUART.getVescValues()) {
     for (int i=0; i<NUM_LEDS; i++) {
       leds[i] = CRGB::Blue; //set led to be green to indicate success vesc
     }
     FastLED.show();
+    DEBUG_PRINT(F("VESC comm 1 ok"));
   } else {
     for (int i=0; i<NUM_LEDS; i++) {
       leds[i] = CRGB::Red; //set led to be red to indicate failure vesc
     }
     FastLED.show();
+    DEBUG_PRINT(F("VESC comm 1 err"));
   }
   delay(500);
 
@@ -333,12 +335,14 @@ void loop() {
     float distance, speed, inpVoltage, battPercent;
 
     if (VUART.getVescValues()) {
-      distance = (float)VUART.data.tachometerAbs*VRATIO_TACHO_KM;
-      DEBUG_PRINT(F("Distance travelled (tachometer): "));
+      DEBUG_PRINT(F("Units in "));
+      DEBUG_PRINT((unitsInKM?"kilometers":"miles"));
+      distance = (float)VUART.data.tachometerAbs*VRATIO_TACHO_KM*(unitsInKM?VRATIO_KM_MI:1);
+      DEBUG_PRINT(F("Distance travelled (from tachometer): "));
       DEBUG_PRINT(String(distance));
 
-      speed = (float)VUART.data.rpm*VRATIO_RPM_SPEED;
-      DEBUG_PRINT(F("Current speed (rpm): "));
+      speed = (float)VUART.data.rpm*VRATIO_RPM_SPEED*(unitsInKM?VRATIO_KM_MI:1);
+      DEBUG_PRINT(F("Current speed (from rpm): "));
       DEBUG_PRINT(String(speed));
 
       inpVoltage = (float)VUART.data.inpVoltage;
@@ -394,10 +398,10 @@ void calculateRatios() { //seperate function to save ram
 
 
   //Hardcoded lol because oof old vesc library
-  int motorPulley = 36;
-  int wheelPulley = 14;
+  int motorPulley = 14;
+  int wheelPulley = 36;
   float gearRatio = (float)motorPulley / (float)wheelPulley;
-  int wheelDiameter = 87;
+  int wheelDiameter = 90; //in mm
   int motorPoles = 14;
   int batteryCells = 10;
   DEBUG_PRINT("Vrat: hard ok");
@@ -405,6 +409,7 @@ void calculateRatios() { //seperate function to save ram
   //The following code yoinked basically directly from https://github.com/SolidGeek/nRF24-Esk8-Remote/blob/master/transmitter/transmitter.ino. Thanks SolidGeek :)
   VRATIO_RPM_SPEED = (gearRatio * 60.0 * (float)wheelDiameter * 3.14156) / (((float)motorPoles / 2.0) * 1000000.0); // ERPM to Km/h
   VRATIO_TACHO_KM = (gearRatio * (float)wheelDiameter * 3.14156) / (((float)motorPoles * 3.0) * 1000000.0); // Pulses to km travelled
+  VRATIO_KM_MI = 0.6214;
   VBATT_MAX = (float)batteryCells*4.2; //assuming max charge of 4.2V per cell
   VBATT_MIN = (float)batteryCells*3.2; //assuming min charge of 3.2V per cell
 }
@@ -422,6 +427,7 @@ void transitionState(int newState) {
       break;
     case 2: //uhoh we are going into remote disconnect mode
       DEBUG_PRINT(F("Uhoh we've lost connection to the remote :("));
+      realRAW = HALL_STOP; //set target to 0 speed to bring us back down to 0 speed
       ledState = 1; //go back into disconnected mode
       realPPM = ESC_STOP; //set target to 0 speed to bring us back down to 0 speed
       break;
@@ -441,7 +447,6 @@ void updateESC() {
     realPPM = ESC_STOP;
   }
 
-  ESC_LEFT.write(realPPM); //write the values
   ESC_RIGHT.write(realPPM);
 }
 

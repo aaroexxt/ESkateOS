@@ -211,6 +211,7 @@ void setup() {
   transitionState(0); //make sure to call transitionState to update screen
 }
 
+int joyB= 127;
 void loop() {
   unsigned long currentMillis = millis(); //store millis value (current value) for reference
 
@@ -235,6 +236,9 @@ void loop() {
         measurement += analogRead(HALLEFFECT);
       }
       measurement /= 10;
+
+      measurement = joyB;
+      joyB++;
 
       if (measurement >= HALL_CENTER) { //if true, we're going forward = >127 value
         int forwardVal = map(measurement, HALL_CENTER, HALL_MAX, THROTTLE_STOP, THROTTLE_MAX); //map from middle to max (127-255)
@@ -265,8 +269,8 @@ void loop() {
         prevThrottle = throttle;
       }
 
-      throttleEnabled = !digitalRead(THROTT_ENABLE_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
-      if (throttleEnabled != oldThrottleEnabled) {
+      throttleEnabled = LOW; //!digitalRead(THROTT_ENABLE_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
+      if (throttleEnabled != oldThrottleEnabled || true) {
         updateDisplayFlag = true; //set display update flag for next timer cycle
         Serial.print(F("ThrottleEnChgState:"));
         Serial.println(throttleEnabled);
@@ -498,6 +502,32 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) { //A lot of help for this: https://g
         }
 
         /*
+        * ENABLED INDICATOR
+        */
+
+        x = 100;
+        y = 40;
+
+        u8g2.setFont(u8g2_font_profont12_tr);
+        if (throttleEnabled) {
+          u8g2.drawStr(x, y, "T:En");
+        } else {
+          u8g2.drawStr(x, y, "T:Dis");
+        }
+
+        /*
+        * LED MODE INDICATOR
+        */
+
+        x = 100;
+        y = 60;
+        u8g2.setFont(u8g2_font_profont12_tr);
+        displayString = "LM:";
+        displayString = displayString.concat(String(ledMode));
+        displayString.toCharArray(displayBuffer, 4);
+        u8g2.drawStr(x, y, displayBuffer);
+
+        /*
         * THROTTLE INDICATOR
         */
         x = 0;
@@ -522,6 +552,7 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) { //A lot of help for this: https://g
             u8g2.drawVLine(x + 50 - i, y + 2, 7);
           }
         }
+
 
         /*
         * VESC DATA INDICATOR
