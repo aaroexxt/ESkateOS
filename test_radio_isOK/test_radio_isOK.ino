@@ -14,6 +14,7 @@ const uint64_t pAddress = 0xB00B1E5000LL;
 
 void setup() 
 {
+  while (!Serial){}
   Serial.begin(9600);   
   printf_begin();       
   wirelessSPI.begin();         

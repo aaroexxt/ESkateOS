@@ -17,6 +17,7 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <U8g2lib.h>
+#include "printf.h"
 
 int MASTER_STATE = 0;
 boolean throttleEnabled = false;
@@ -90,9 +91,11 @@ const unsigned char signal_noconnection_bits[] = {
 #define THROTTLE_MAX 255
 #define THROTTLE_STOP (THROTTLE_MIN+THROTTLE_MAX)/2
 
-#define HALL_MIN 0
-#define HALL_MAX 1023
-#define HALL_CENTER (HALL_MIN+HALL_MAX)/2
+//Hall middle 633
+//Hall real low 481
+#define HALL_MIN 500
+#define HALL_MAX 1100
+#define HALL_CENTER 700//(HALL_MIN+HALL_MAX)/2
 
 int prevThrottle = THROTTLE_STOP;
 int throttle = THROTTLE_STOP;
@@ -166,10 +169,10 @@ boolean connected = false; //check if connected
 boolean oldConnected = false;
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println(F("Eskate controller setup begin"));
 
-  pinMode(HALLEFFECT, INPUT);
+  pinMode(HALLEFFECT, INPUT_PULLUP);
   pinMode(THROTT_ENABLE_SW, INPUT_PULLUP);
   pinMode(VBATT_PIN, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
@@ -198,6 +201,9 @@ void setup() {
   radio.openWritingPipe(addresses[0]);
   radio.openReadingPipe(1, addresses[1]); //set address to recieve data
   radioTransmitMode();
+  Serial.println(F("Radio details:"));
+  printf_begin();
+  radio.printDetails();
   Serial.println(F("Setup radio: ok"));
 
   updateDisplay(DISPU_START);
@@ -211,7 +217,6 @@ void setup() {
   transitionState(0); //make sure to call transitionState to update screen
 }
 
-int joyB= 127;
 void loop() {
   unsigned long currentMillis = millis(); //store millis value (current value) for reference
 
@@ -237,8 +242,7 @@ void loop() {
       }
       measurement /= 10;
 
-      measurement = joyB;
-      joyB++;
+      //Serial.println(measurement);
 
       if (measurement >= HALL_CENTER) { //if true, we're going forward = >127 value
         int forwardVal = map(measurement, HALL_CENTER, HALL_MAX, THROTTLE_STOP, THROTTLE_MAX); //map from middle to max (127-255)
@@ -253,7 +257,7 @@ void loop() {
       }
       if (throttle != prevThrottle) {
         //Update display
-        if (abs(throttle-prevThrottle) > 5) { //because display updates are kinda annoying, try to prevent as many as we can. make sure difference is at least 5
+        if (abs(throttle-prevThrottle) > 2) { //because display updates are kinda annoying, try to prevent as many as we can. make sure difference is at least 5
           updateDisplayFlag = true; //set display update flag for next timer cycle
           Serial.print(F("HallChgState:"));
           Serial.println(throttle);
@@ -269,8 +273,8 @@ void loop() {
         prevThrottle = throttle;
       }
 
-      throttleEnabled = LOW; //!digitalRead(THROTT_ENABLE_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
-      if (throttleEnabled != oldThrottleEnabled || true) {
+      throttleEnabled = !digitalRead(THROTT_ENABLE_SW); //because of input pullup, invert inputs (since it'll be pulled to ground if high)
+      if (throttleEnabled != oldThrottleEnabled) {
         updateDisplayFlag = true; //set display update flag for next timer cycle
         Serial.print(F("ThrottleEnChgState:"));
         Serial.println(throttleEnabled);
@@ -326,14 +330,6 @@ void loop() {
         }
       }
       break;
-  }
-
-  if (currentMillis-prevHBMillis >= HBInterval) { //every HBInterval ms send a new heartbeat to board
-    radioTransmitMode();
-    resetDataTx();
-    dataTx[0] = HEARTBEAT;
-    radio.write(&dataTx, sizeof(dataTx));
-    prevHBMillis = currentMillis;
   }
 
   radioRecieveMode(); //Check for any data from the board
@@ -402,6 +398,15 @@ void loop() {
       Serial.println(String(vesc_values_realtime.inputVoltage));
       Serial.println(String(vesc_values_realtime.battPercent));
     }
+  }
+
+  if (currentMillis-prevHBMillis >= HBInterval) { //every HBInterval ms send a new heartbeat to board
+    //Serial.println("board ping");
+    radioTransmitMode();
+    resetDataTx();
+    dataTx[0] = HEARTBEAT;
+    radio.write(&dataTx, sizeof(dataTx));
+    prevHBMillis = currentMillis;
   }
 
   //Check if controller is still connected (hearbeat signal present within time?)
@@ -505,25 +510,39 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) { //A lot of help for this: https://g
         * ENABLED INDICATOR
         */
 
-        x = 100;
+        x = 110;
         y = 40;
 
         u8g2.setFont(u8g2_font_profont12_tr);
         if (throttleEnabled) {
-          u8g2.drawStr(x, y, "T:En");
+          u8g2.drawStr(x, y, "T:E");
         } else {
-          u8g2.drawStr(x, y, "T:Dis");
+          u8g2.drawStr(x, y, "T:D");
+        }
+
+        /*
+        * BOOST INDICATOR
+        */
+
+        x = 110;
+        y = 50;
+
+        u8g2.setFont(u8g2_font_profont12_tr);
+        if (boostEnabled) {
+          u8g2.drawStr(x, y, "B:E");
+        } else {
+          u8g2.drawStr(x, y, "B:D");
         }
 
         /*
         * LED MODE INDICATOR
         */
 
-        x = 100;
+        x = 110;
         y = 60;
         u8g2.setFont(u8g2_font_profont12_tr);
-        displayString = "LM:";
-        displayString = displayString.concat(String(ledMode));
+        displayString = "L:";
+        displayString += String(ledMode);
         displayString.toCharArray(displayBuffer, 4);
         u8g2.drawStr(x, y, displayBuffer);
 

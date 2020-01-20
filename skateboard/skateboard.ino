@@ -16,6 +16,7 @@
 #include <FastLED.h>
 #include <RF24.h>
 #include <VescUart.h> //Thank you to Gian Marcov for this awesome library: https://github.com/gianmarcov/arduino_vesc. Modified by me (Aaron Becker) to use SoftwareSerial instead of HardwareSerial
+#include "printf.h"
 
 //Debug stuff (incompatible with vesc)
 
@@ -25,8 +26,10 @@
 #ifdef DEBUG
   #define DEBUG_PRINT(x)  Serial.println (x)
   #include "printf.h"
+  const boolean debug = true;
 #else
   #define DEBUG_PRINT(x)
+  const boolean debug = false;
 #endif
 
 
@@ -63,7 +66,7 @@ unsigned long prevVUpdateMillis = 0;
 #define LED_DATA_PIN    3
 #define LED_TYPE    WS2811
 #define COLOR_ORDER GRB
-#define NUM_LEDS    30
+#define NUM_LEDS    32
 CRGB leds[NUM_LEDS];
 #define LED_BRIGHTNESS 128
 #define LED_FPS 120
@@ -138,6 +141,21 @@ void setup() {
   ESC_RIGHT.write(ESC_STOP);
   DEBUG_PRINT(F("Setup esc: ok"));
 
+  //Setup radio
+  radio.begin();
+  radio.setPALevel(RF24_PA_MAX); //max because we don't want to lose connection
+  radio.setRetries(3,3); // delay, count
+  //SKATEBOARD Writes to addr 2, reads from addr 1
+  radio.openWritingPipe(addresses[1]);
+  radio.openReadingPipe(1, addresses[0]); //set address to recieve data
+  radioRecieveMode();
+  DEBUG_PRINT(F("Radio details:"));
+  if (debug) {
+    printf_begin();
+    radio.printDetails();
+  }
+  DEBUG_PRINT(F("Setup radio: ok"));
+
   //Setup LEDS
   FastLED.addLeds<LED_TYPE,LED_DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(LED_BRIGHTNESS);
@@ -171,16 +189,6 @@ void setup() {
   calculateRatios();
 
   DEBUG_PRINT(F("Setup VESC: ok")); //TODO add check if it's null or 0 so it can fail properly
-
-  //Setup radio
-  radio.begin();
-  radio.setPALevel(RF24_PA_MAX); //max because we don't want to lose connection
-  radio.setRetries(3,3); // delay, count
-  //SKATEBOARD Writes to addr 2, reads from addr 1
-  radio.openWritingPipe(addresses[1]);
-  radio.openReadingPipe(1, addresses[0]); //set address to recieve data
-  radioRecieveMode();
-  DEBUG_PRINT(F("Setup radio: ok"));
 
   transitionState(0);
 }
@@ -218,17 +226,17 @@ void loop() {
       if (radio.available()) {
         resetDataRx();
         radio.read(&dataRx, sizeof(dataRx));
-        if (dataRx[0] != 200) {
+        /*if (dataRx[0] != 200) {
           DEBUG_PRINT("RECV COMM ID: "+String(dataRx[0]));
-        }
-        /*if (dataRx[0] != HEARTBEAT) {
-          DEBUG_PRINT("Got event #: ");
+        }*/
+        if (dataRx[0] != HEARTBEAT) {
+          DEBUG_PRINT("Got comm event #: ");
           DEBUG_PRINT(dataRx[0]);
           DEBUG_PRINT(", value1: ");
           DEBUG_PRINT(dataRx[1]);
           DEBUG_PRINT(", value2: ");
           DEBUG_PRINT(dataRx[2]);
-        }*/
+        }
         switch ((int)dataRx[0]) {
           case THROTTLE_VAL: //1 is throttle update
             realRAW = dataRx[1];
