@@ -119,6 +119,15 @@ struct VREALTIME {
 };
 struct VREALTIME vesc_values_realtime;
 
+//Gyro/accel/temp data
+struct SREALTIME {
+  float inclination;
+  float acceleration;
+  float temperature;
+  float altitude;
+}
+struct SREALTIME sensor_values_realtime;
+
 //Radio pins/defs
 RF24 radio(7, 8);
 const byte addresses [][6] = {"00001", "00002"}; //write at addr 00001, read at addr 00002
@@ -139,7 +148,8 @@ ID 4: BOOST switch update. Data: [boostMode (0, 1), 0]
 ID 10: Ask controller to send state of all peripherals
 ID 11: Controller force screen update
 ID 12: VESC data [id, value]. ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is fet temp, ID 4 is batt percent
-ID 13: Play tone
+ID 13: Sensor data [id, value]. ID 0 is inclination, ID 1 is acceleration, ID 2 is temperature, ID 3 is altitude
+ID 14: Play tone
 */
 
 typedef enum {
@@ -155,7 +165,8 @@ typedef enum {
   SENDALLDATA = 10,
   SCREENUPDATE = 11,
   VESCDATA = 12,
-  TONE = 13
+  SENSDATA = 13,
+  TONE = 14
 } RADIO_COMMANDS;
 
 double dataRx[3];
