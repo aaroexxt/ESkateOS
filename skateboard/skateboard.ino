@@ -126,7 +126,7 @@ ID 4: BOOST switch update. Data: [boostMode (0, 1), 0]
 ID 10: Ask controller to send state of all peripherals
 ID 11: Controller force screen update
 ID 12: VESC data [id, value]. ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is fet temp, ID 4 is batt percent
-ID 13: Sensor data [id, value]. ID 0 is inclination, ID 1 is acceleration, ID 2 is temperature, ID 3 is altitude
+ID 13: Sensor data [id, value]. ID 0 is pitch, ID 1 is roll, ID 2 is heading, ID 3 is acceleration, ID 4 is temperature, ID 5 is altitude
 ID 14: Play tone
 */
 
@@ -541,7 +541,7 @@ void sendSensorData() {
   DEBUG_PRINT(F("Altitude value: "));
   DEBUG_PRINT(altitude);
 
-  //ID 13: Sensor data [id, value]. ID 0 is pitch, ID 3 is acceleration, ID 4 is temperature, ID 5 is altitude
+  //ID 13: Sensor data [id, value]. ID 0 is pitch, ID 1 is roll, ID 2 is heading, ID 3 is acceleration, ID 4 is temperature, ID 5 is altitude
   dataTx[0] = 13;
   dataTx[1] = 0;
   dataTx[2] = pitch;
