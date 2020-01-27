@@ -170,6 +170,7 @@ typedef enum {
   THROTTLE_SW = 2,
   LEDMODE = 3,
   BOOSTMODE = 4,
+  CLICK = 5,
 
   //Board -> Controller
   SENDALLDATA = 10,
@@ -185,7 +186,7 @@ unsigned long prevHBMillis = 0;
 unsigned long prevRadioResendMillis = 0;
 unsigned long lastHBTime = 0; //time when heartbeat signal was last recieved
 #define HBInterval 125 //send a heartbeat every 125ms, 8x per second
-#define radioResendInterval 300 //send all radio commands every 300ms, ~3x per secodn
+#define radioResendInterval 250 //send all radio commands every 250ms, ~4x per secodn
 #define HBTimeoutMax 750 //max time between signals before board cuts the motors in ms
 boolean radioListening = false;
 boolean connected = false; //check if connected
@@ -260,10 +261,14 @@ void loop() {
         Serial.print(ENclicks);
         Serial.println(F(" times"));
 
-        if (ENclicks == 3) { //clicked 3 times
-          ENclicks = 0;
-          ENLastClickTime = 0;
+        //Now send the data since there's been an update
+        radioTransmitMode();
+        resetDataTx();
+        dataTx[0] = CLICK; //click event
+        dataTx[1] = ENclicks;
+        radio.write(&dataTx, sizeof(dataTx));
 
+        if (ENclicks == 3) { //clicked 3 times
           if (MASTER_STATE == 0) { //If we're in state 0, triple click should transition to normal display (for testing reasons for example)
             transitionState(1);
           } else {
@@ -481,7 +486,7 @@ void loop() {
     sendAllRadioCommands(); //don't need to send second HB signal because it was already send in sendAllRadioCommands
     prevHBMillis = currentMillis;
     prevRadioResendMillis = currentMillis;
-  } else if (currentMillis-prevHBMillis >= HBInterval) { //every HBInterval ms send a new heartbeat to board (if it isn't already in )
+  } else if (currentMillis-prevHBMillis >= HBInterval) { //every HBInterval ms send a new heartbeat to board (if it isn't already sent
     //Serial.println("board ping");
     radioTransmitMode();
     resetDataTx();
@@ -538,6 +543,10 @@ void sendAllRadioCommands() { //sends all commands to board
   resetDataTx();
   dataTx[0] = THROTTLE_VAL; //throttle update
   dataTx[1] = prevThrottle;
+  radio.write(&dataTx, sizeof(dataTx));
+  resetDataTx();
+  dataTx[0] = CLICK; //click event
+  dataTx[1] = ENclicks;
   radio.write(&dataTx, sizeof(dataTx));
 }
 
