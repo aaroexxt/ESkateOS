@@ -11,7 +11,7 @@
   V2 Dec 2019/Jan 2020
 */
 
-#include <ServoTimer2.h>
+#include <Servo.h>
 #include <Wire.h>
 #include <FastLED.h>
 #include <RF24.h>
@@ -39,9 +39,8 @@
 
 
 //ESC pins
-ServoTimer2 ESC_RIGHT; //Create FSESC "servo" output
+Servo ESC_RIGHT; //Create FSESC "servo" output
 #define ESC_R_PIN 5
-#define ESC_L_PIN 6
 
 #define ESC_MIN 800
 #define ESC_NONBOOST_MAX 1700
@@ -260,7 +259,7 @@ void loop() {
         /*if (dataRx[0] != 200) {
           DEBUG_PRINT("RECV COMM ID: "+String(dataRx[0]));
         }*/
-        if (dataRx[0] != HEARTBEAT && (debug || true)) {
+        if (dataRx[0] != HEARTBEAT && debug) {
           Serial.print(F("Got comm event #: "));
           Serial.println(dataRx[0]);
           Serial.print(F(", value1: "));
