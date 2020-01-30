@@ -18,14 +18,14 @@
 #include <VescUart.h> //Thank you to Gian Marcov for this awesome library: https://github.com/gianmarcov/arduino_vesc. Modified by me (Aaron Becker) to use SoftwareSerial instead of HardwareSerial
 #include "printf.h"
 
-#include <Adafruit_Sensor.h>
-#include <Adafruit_LSM303_U.h>
-#include <Adafruit_BMP085_U.h>
-#include <Adafruit_10DOF.h>
+//#include <Adafruit_Sensor.h>
+//#include <Adafruit_LSM303_U.h>
+//#include <Adafruit_BMP085_U.h>
+//#include <Adafruit_10DOF.h>
 
 //Debug stuff (incompatible with vesc)
 
-#define DEBUG
+//#define DEBUG
 
 
 #ifdef DEBUG
@@ -91,11 +91,11 @@ int ledState = 1;
 */
 
 //IMU pins/defs
-Adafruit_10DOF                dof   = Adafruit_10DOF();
-Adafruit_LSM303_Accel_Unified accel = Adafruit_LSM303_Accel_Unified(30301);
-Adafruit_LSM303_Mag_Unified   mag   = Adafruit_LSM303_Mag_Unified(30302);
-Adafruit_BMP085_Unified       bmp   = Adafruit_BMP085_Unified(18001);
-const float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA; //sea level pressure in HPA
+//Adafruit_10DOF                dof   = Adafruit_10DOF();
+//Adafruit_LSM303_Accel_Unified accel = Adafruit_LSM303_Accel_Unified(30301);
+//Adafruit_LSM303_Mag_Unified   mag   = Adafruit_LSM303_Mag_Unified(30302);
+//Adafruit_BMP085_Unified       bmp   = Adafruit_BMP085_Unified(18001);
+//const float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA; //sea level pressure in HPA
 const char ACCEL_AXIS = 'x'; //axis that board accelerates along; used for accel math
 
 unsigned long prevSUpdateMillis = 0;
@@ -192,7 +192,7 @@ void setup() {
   DEBUG_PRINT(F("Setup leds: ok"));
 
   //Setup accelerometer
-  if(!accel.begin())
+  /*if(!accel.begin())
   {
     // There was a problem detecting the ADXL345 ... check your connections
     Serial.println(F("Setup accel: fail. not detected :("));
@@ -209,7 +209,7 @@ void setup() {
     // There was a problem detecting the BMP085 ... check your connections
     Serial.print("Setup bmp: fail. not detected :(");
     while(1);
-  }
+  }*/
   DEBUG_PRINT("Setup accel/mag/bmp: ok");
   //Setup VESC UART
   DEBUG_PRINT(F("bef vesc init"));
@@ -481,18 +481,19 @@ void sendVESCData() {
 }
 
 void sendSensorData() {
+  return;
   radioTransmitMode();
   resetDataTx();
 
   //Define variables to store accel events
-  sensors_event_t accel_event;
+  /*sensors_event_t accel_event;
   sensors_event_t mag_event;
   sensors_event_t bmp_event;
-  sensors_vec_t   orientation;
+  sensors_vec_t   orientation;*/
   //Floats to store data
-  float pitch, roll, heading, acceleration, temperature, altitude;
+  float pitch, roll, heading, acceleration, temperature, altitude = -1;
 
-  accel.getEvent(&accel_event);
+  /*accel.getEvent(&accel_event);
   if (!dof.accelGetOrientation(&accel_event, &orientation)) {
     DEBUG_PRINT(F("Error getting accel orientation"));
     return;
@@ -538,7 +539,7 @@ void sendSensorData() {
   DEBUG_PRINT(F("Temperature value: "));
   DEBUG_PRINT(temperature);
   DEBUG_PRINT(F("Altitude value: "));
-  DEBUG_PRINT(altitude);
+  DEBUG_PRINT(altitude);*/
 
   //ID 13: Sensor data [id, value]. ID 0 is pitch, ID 1 is roll, ID 2 is heading, ID 3 is acceleration, ID 4 is temperature, ID 5 is altitude
   dataTx[0] = 13;
@@ -600,6 +601,7 @@ void updateESC() {
     realPPM = ESC_STOP;
   }
 
+  Serial.println(realPPM);
   ESC_RIGHT.write(realPPM);
 }
 
