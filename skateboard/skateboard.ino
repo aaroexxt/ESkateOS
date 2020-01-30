@@ -39,8 +39,8 @@
 
 
 //ESC pins
-Servo ESC_RIGHT; //Create FSESC "servo" output
-#define ESC_R_PIN 5
+Servo ESC; //Create FSESC "servo" output
+#define ESC_PIN 5
 
 #define ESC_MIN 800
 #define ESC_NONBOOST_MAX 1700
@@ -162,8 +162,8 @@ void setup() {
   Serial.println(F("ESKATEINIT_setup begin. By Aaron Becker"));
 
   //Setup ESC
-  ESC_RIGHT.attach(ESC_R_PIN);
-  ESC_RIGHT.write(ESC_STOP);
+  ESC.attach(ESC_PIN);
+  ESC.write(ESC_STOP);
   DEBUG_PRINT(F("Setup esc: ok"));
 
   //Setup radio
@@ -595,14 +595,18 @@ void updateESC() {
 
   if (throttleEnabled) {
     realRAW = constrain(realRAW, HALL_MIN, HALL_MAX); //constrain raw value
-    realPPM = map(realRAW, HALL_MIN, HALL_MAX, ESC_MIN, (boostEnabled) ? ESC_MAX : ESC_NONBOOST_MAX); //calculate ppm
+    int targetPPM = map(realRAW, HALL_MIN, HALL_MAX, ESC_MIN, ESC_MAX); //calculate ppm
+    if (realPPM < targetPPM) {
+      realPPM += (boostEnabled) ? 50 : 25;
+    } else {
+      realPPM -= (boostEnabled) ? 50 : 25;
+    }
     realPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits for safety even tho it should never be an issue
   } else {
     realPPM = ESC_STOP;
   }
 
-  Serial.println(realPPM);
-  ESC_RIGHT.write(realPPM);
+  ESC.write(realPPM);
 }
 
 void radioRecieveMode() {
