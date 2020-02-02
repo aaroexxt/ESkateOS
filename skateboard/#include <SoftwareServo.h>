@@ -589,24 +589,19 @@ void transitionState(int newState) {
 }
 
 void updateESC() {
+  if (abs(realPPM-ESC_STOP) < 50) {
+    realPPM = ESC_STOP;
+  }
+
   if (throttleEnabled) {
     realRAW = constrain(realRAW, HALL_MIN, HALL_MAX); //constrain raw value
     int targetPPM = map(realRAW, HALL_MIN, HALL_MAX, ESC_MAX, ESC_MIN); //calculate ppm
-    if (abs(targetPPM-ESC_STOP) < 50) {
-      targetPPM = ESC_STOP;
-    }
-
     if (realPPM < targetPPM) {
-      realPPM += (targetPPM < ESC_STOP) ? 10 : (boostEnabled) ? 10 : 1;
+      realPPM += (boostEnabled) ? 200 : 100;
     } else {
-      realPPM -= 3;
+      realPPM -= (boostEnabled) ? 200 : 100;
     }
     realPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits for safety even tho it should never be an issue
-
-    /*Serial.print("Target: ");
-    Serial.print(targetPPM);
-    Serial.print(" real: ");
-    Serial.println(realPPM);*/
   } else {
     realPPM = ESC_STOP;
   }
