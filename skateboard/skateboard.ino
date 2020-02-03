@@ -47,6 +47,10 @@ Servo ESC; //Create FSESC "servo" output
 #define ESC_MAX 2000
 #define ESC_STOP (ESC_MIN+ESC_MAX)/2
 
+#define PPM_BRAKE_RATE 2
+#define PPM_ACCEL_RATE_NONBOOST 1
+#define PPM_ACCEL_RATE_BOOST 5
+
 #define HALL_MIN 0
 #define HALL_MAX 255
 #define HALL_STOP (HALL_MAX+HALL_MIN)/2
@@ -592,14 +596,14 @@ void updateESC() {
   if (throttleEnabled) {
     realRAW = constrain(realRAW, HALL_MIN, HALL_MAX); //constrain raw value
     int targetPPM = map(realRAW, HALL_MIN, HALL_MAX, ESC_MAX, ESC_MIN); //calculate ppm
-    if (abs(targetPPM-ESC_STOP) < 50) {
+    if (abs(targetPPM-ESC_STOP) < 60) {
       targetPPM = ESC_STOP;
     }
 
     if (realPPM < targetPPM) {
-      realPPM += (targetPPM < ESC_STOP) ? 10 : (boostEnabled) ? 10 : 1;
+      realPPM += (targetPPM < ESC_STOP) ? PPM_ACCEL_RATE_BOOST : (boostEnabled) ? PPM_ACCEL_RATE_BOOST : PPM_ACCEL_RATE_NONBOOST; //essentially, stop slowing down at boost rate (if less than stop pos). Otherwise defer to boost rate
     } else {
-      realPPM -= 3;
+      realPPM -= PPM_BRAKE_RATE;
     }
     realPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits for safety even tho it should never be an issue
 
