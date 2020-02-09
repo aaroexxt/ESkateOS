@@ -47,6 +47,10 @@ Servo ESC; //Create FSESC "servo" output
 #define ESC_MAX 2000
 #define ESC_STOP (ESC_MIN+ESC_MAX)/2
 
+#define PPM_BRAKE_RATE 2
+#define PPM_ACCEL_RATE_NONBOOST 1
+#define PPM_ACCEL_RATE_BOOST 5
+
 #define HALL_MIN 0
 #define HALL_MAX 255
 #define HALL_STOP (HALL_MAX+HALL_MIN)/2
@@ -73,7 +77,7 @@ boolean initialVESCCheck = false;
 #define LED_DATA_PIN    3
 #define LED_TYPE    WS2811
 #define COLOR_ORDER GRB
-#define NUM_LEDS    32
+#define NUM_LEDS    34
 CRGB leds[NUM_LEDS];
 #define LED_BRIGHTNESS 128
 #define LED_FPS 120
@@ -185,7 +189,7 @@ void setup() {
   FastLED.addLeds<LED_TYPE,LED_DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(LED_BRIGHTNESS);
   FastLED.clear();
-  for (int i=0; i<NUM_LEDS; i++) {
+  for (int i=0; i<NUM_LEDS-2; i++) {
     leds[i] = CRGB::White; //set all leds to be off
   }
   FastLED.show();
@@ -329,7 +333,7 @@ void loop() {
     switch (ledState) {
       case 1: //blue chase
         LEDdelay = LEDdelayLong;
-        for (int i=0; i<NUM_LEDS; i++) {
+        for (int i=0; i<NUM_LEDS-2; i++) {
           if ((i+ledPosition)%5 == 0) {
             leds[i] = CRGB::Green;
           } else {
@@ -346,13 +350,13 @@ void loop() {
         LEDdelay = LEDdelayShort;
       //TODO MAKE RAINBOW FADE IN/OUT BASED ON THROTTLE
       //https://github.com/marmilicious/FastLED_examples/blob/master/rainbow_brightness_and_saturation.ino
-        fill_rainbow(leds, NUM_LEDS, millis()/10, 7);
+        fill_rainbow(leds, NUM_LEDS-2, millis()/10, 7);
         FastLED.show();
         break;
       case 3: //color changes based on throttle (chaser again)
         LEDdelay = LEDdelayShort;
         int mappedVal = map(realPPM, ESC_MIN, ESC_MAX, 255, 0);
-        for (int i=0; i<NUM_LEDS; i++) {
+        for (int i=0; i<NUM_LEDS-2; i++) {
           leds[i] = CRGB(mappedVal, 0, 255-mappedVal);
         }
         FastLED.show();
@@ -377,14 +381,14 @@ void loop() {
   if (currentMillis>initialVESCCheckDelay && !initialVESCCheck) { //VESC status check
     initialVESCCheck = true;
     if (VUART.getVescValues()) {
-      for (int i=0; i<NUM_LEDS; i++) {
+      for (int i=0; i<NUM_LEDS-2; i++) {
         leds[i] = CRGB::Blue; //set led to be green to indicate success vesc
       }
       FastLED.show();
       DEBUG_PRINT(F("VESC comm 1 ok"));
       delay(500);
     } else {
-      for (int i=0; i<NUM_LEDS; i++) {
+      for (int i=0; i<NUM_LEDS-2; i++) {
         leds[i] = CRGB::Red; //set led to be red to indicate failure vesc
       }
       FastLED.show();
@@ -589,19 +593,35 @@ void transitionState(int newState) {
 }
 
 void updateESC() {
-  if (abs(realPPM-ESC_STOP) < 50) {
-    realPPM = ESC_STOP;
-  }
-
   if (throttleEnabled) {
     realRAW = constrain(realRAW, HALL_MIN, HALL_MAX); //constrain raw value
     int targetPPM = map(realRAW, HALL_MIN, HALL_MAX, ESC_MAX, ESC_MIN); //calculate ppm
-    if (realPPM < targetPPM) {
-      realPPM += (boostEnabled) ? 200 : 100;
+    if (abs(targetPPM-ESC_STOP) < 100) {
+      targetPPM = ESC_STOP;
+    }
+
+    if (targetPPM < ESC_STOP) {
+      for (int i = NUM_LEDS-2; i<NUM_LEDS; i++) {
+        leds[i] = CRGB::Red;
+      }
     } else {
-      realPPM -= (boostEnabled) ? 200 : 100;
+      for (int i = NUM_LEDS-2; i<NUM_LEDS; i++) {
+        leds[i] = CRGB::Black;
+      }
+    }
+    FastLED.show();
+
+    if (realPPM < targetPPM) {
+      realPPM += (targetPPM < ESC_STOP) ? PPM_ACCEL_RATE_BOOST : (boostEnabled) ? PPM_ACCEL_RATE_BOOST : PPM_ACCEL_RATE_NONBOOST; //essentially, stop slowing down at boost rate (if less than stop pos). Otherwise defer to boost rate
+    } else {
+      realPPM -= PPM_BRAKE_RATE;
     }
     realPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits for safety even tho it should never be an issue
+
+    /*Serial.print("Target: ");
+    Serial.print(targetPPM);
+    Serial.print(" real: ");
+    Serial.println(realPPM);*/
   } else {
     realPPM = ESC_STOP;
   }
