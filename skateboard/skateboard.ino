@@ -25,7 +25,7 @@
 
 //Debug stuff (incompatible with vesc)
 
-//#define DEBUG
+#define DEBUG
 
 
 #ifdef DEBUG
@@ -47,7 +47,7 @@ Servo ESC; //Create FSESC "servo" output
 #define ESC_MAX 2000
 #define ESC_STOP (ESC_MIN+ESC_MAX)/2
 
-#define PPM_BRAKE_RATE 2
+#define PPM_BRAKE_RATE 2 //in pulses per loop cycle (lol love those units)
 #define PPM_ACCEL_RATE_NONBOOST 1
 #define PPM_ACCEL_RATE_BOOST 5
 
@@ -77,8 +77,9 @@ boolean initialVESCCheck = false;
 #define LED_DATA_PIN    3
 #define LED_TYPE    WS2811
 #define COLOR_ORDER GRB
-#define NUM_LEDS    32
-CRGB leds[NUM_LEDS];
+#define NUM_LEDS_GENERAL    32
+#define NUM_LEDS_BRAKE    6
+CRGB leds[NUM_LEDS_GENERAL+NUM_LEDS_BRAKE];
 #define LED_BRIGHTNESS 128
 #define LED_FPS 120
 unsigned long prevLEDMillis = 0;
@@ -86,13 +87,27 @@ unsigned long prevLEDMillis = 0;
 #define LEDdelayLong 100
 int LEDdelay = LEDdelayLong;
 int ledPosition = 0; //current position in strip for pattern
-int ledState = 1;
+
+typedef enum {
+  LEDSTATE_OFF = 0,
+  LEDSTATE_INITCHASE = 1,
+  LEDSTATE_RAINBOW = 2,
+  LEDSTATE_CHGTHROTT = 3
+} LEDLIGHT_STATES;
+int ledState = LEDSTATE_INITCHASE;
 /* LED STATES MASTER
 0 off
 1 initial or disconnect leds (chasing blue)
 2 rainbow
 3 follow throttle
 */
+
+typedef enum {
+  BRAKELIGHT_INIT = 0,
+  BRAKELIGHT_NOTBRAKING = 1,
+  BRAKELIGHT_BRAKING = 2
+} BRAKELIGHT_STATES;
+int brakeLightState = BRAKELIGHT_INIT;
 
 //IMU pins/defs
 //Adafruit_10DOF                dof   = Adafruit_10DOF();
@@ -186,10 +201,10 @@ void setup() {
   DEBUG_PRINT(F("Setup radio: ok"));
 
   //Setup LEDS
-  FastLED.addLeds<LED_TYPE,LED_DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
+  FastLED.addLeds<LED_TYPE,LED_DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS_GENERAL+NUM_LEDS_BRAKE).setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(LED_BRIGHTNESS);
   FastLED.clear();
-  for (int i=0; i<NUM_LEDS; i++) {
+  for (int i=0; i<NUM_LEDS_GENERAL+NUM_LEDS_BRAKE; i++) {
     leds[i] = CRGB::White; //set all leds to be off
   }
   FastLED.show();
@@ -328,38 +343,58 @@ void loop() {
 
   unsigned long currentMillis = millis();
   
-  if (currentMillis-prevLEDMillis>=LEDdelay && ledState > 0) { //make sure the leds are enabled
+  if (currentMillis-prevLEDMillis>=LEDdelay) { //make sure the leds are enabled
     prevLEDMillis = currentMillis;
-    switch (ledState) {
-      case 1: //blue chase
-        LEDdelay = LEDdelayLong;
-        for (int i=0; i<NUM_LEDS; i++) {
-          if ((i+ledPosition)%5 == 0) {
-            leds[i] = CRGB::Green;
-          } else {
-            leds[i] = CRGB::Black;
+    if (ledState > LEDSTATE_OFF) {
+      switch (ledState) {
+        case LEDSTATE_INITCHASE: //blue chase
+          LEDdelay = LEDdelayLong;
+          for (int i=0; i<NUM_LEDS_GENERAL; i++) {
+            if ((i+ledPosition)%5 == 0) {
+              leds[i] = CRGB::Green;
+            } else {
+              leds[i] = CRGB::Black;
+            }
           }
+          ledPosition++;
+          if (ledPosition > 4) {
+            ledPosition = 0;
+          }
+          FastLED.show();
+          break;
+        case LEDSTATE_RAINBOW: //rainbow
+          LEDdelay = LEDdelayShort;
+        //TODO MAKE RAINBOW FADE IN/OUT BASED ON THROTTLE
+        //https://github.com/marmilicious/FastLED_examples/blob/master/rainbow_brightness_and_saturation.ino
+          fill_rainbow(leds, NUM_LEDS_GENERAL, millis()/10, 7);
+          FastLED.show();
+          break;
+        case LEDSTATE_CHGTHROTT: //color changes based on throttle (chaser again)
+          LEDdelay = LEDdelayShort;
+          int mappedVal = map(realPPM, ESC_MIN, ESC_MAX, 255, 0);
+          for (int i=0; i<NUM_LEDS_GENERAL; i++) {
+            leds[i] = CRGB(mappedVal, 0, 255-mappedVal);
+          }
+          FastLED.show();
+          break;
+      }
+    }
+
+    switch (brakeLightState) {
+      case BRAKELIGHT_INIT:
+        for (int i=0; NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Green;
         }
-        ledPosition++;
-        if (ledPosition > 4) {
-          ledPosition = 0;
-        }
-        FastLED.show();
         break;
-      case 2: //rainbow
-        LEDdelay = LEDdelayShort;
-      //TODO MAKE RAINBOW FADE IN/OUT BASED ON THROTTLE
-      //https://github.com/marmilicious/FastLED_examples/blob/master/rainbow_brightness_and_saturation.ino
-        fill_rainbow(leds, NUM_LEDS, millis()/10, 7);
-        FastLED.show();
-        break;
-      case 3: //color changes based on throttle (chaser again)
-        LEDdelay = LEDdelayShort;
-        int mappedVal = map(realPPM, ESC_MIN, ESC_MAX, 255, 0);
-        for (int i=0; i<NUM_LEDS; i++) {
-          leds[i] = CRGB(mappedVal, 0, 255-mappedVal);
+      case BRAKELIGHT_BRAKING:
+        for (int i=0; NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Red;
         }
-        FastLED.show();
+        break;
+      case BRAKELIGHT_NOTBRAKING:
+        for (int i=0; NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Black;
+        }
         break;
     }
   }
@@ -381,14 +416,14 @@ void loop() {
   if (currentMillis>initialVESCCheckDelay && !initialVESCCheck) { //VESC status check
     initialVESCCheck = true;
     if (VUART.getVescValues()) {
-      for (int i=0; i<NUM_LEDS; i++) {
+      for (int i=0; i<NUM_LEDS_GENERAL; i++) {
         leds[i] = CRGB::Blue; //set led to be green to indicate success vesc
       }
       FastLED.show();
       DEBUG_PRINT(F("VESC comm 1 ok"));
       delay(500);
     } else {
-      for (int i=0; i<NUM_LEDS; i++) {
+      for (int i=0; i<NUM_LEDS_GENERAL; i++) {
         leds[i] = CRGB::Red; //set led to be red to indicate failure vesc
       }
       FastLED.show();
@@ -578,7 +613,7 @@ void transitionState(int newState) {
   DEBUG_PRINT(newState);
   switch (newState) {
     case 1:
-      if (ledState == 0) { //enable/disable the leds based on what's going on
+      if (ledState == LEDSTATE_OFF) { //enable/disable the leds based on what's going on
         FastLED.clear();
         FastLED.show();
       }
@@ -586,7 +621,7 @@ void transitionState(int newState) {
     case 2: //uhoh we are going into remote disconnect mode
       DEBUG_PRINT(F("Uhoh we've lost connection to the remote :("));
       realRAW = HALL_STOP; //set target to 0 speed to bring us back down to 0 speed
-      ledState = 1; //go back into disconnected mode
+      ledState = LEDSTATE_INITCHASE; //go back into disconnected mode
       realPPM = ESC_STOP; //set target to 0 speed to bring us back down to 0 speed
       break;
   }  
@@ -599,6 +634,8 @@ void updateESC() {
     if (abs(targetPPM-ESC_STOP) < 60) {
       targetPPM = ESC_STOP;
     }
+
+    brakeLightState = (targetPPM < ESC_STOP) ? BRAKELIGHT_BRAKING : BRAKELIGHT_NOTBRAKING; //set brake light state based on whether we're below ESC_STOP threshold
 
     if (realPPM < targetPPM) {
       realPPM += (targetPPM < ESC_STOP) ? PPM_ACCEL_RATE_BOOST : (boostEnabled) ? PPM_ACCEL_RATE_BOOST : PPM_ACCEL_RATE_NONBOOST; //essentially, stop slowing down at boost rate (if less than stop pos). Otherwise defer to boost rate
