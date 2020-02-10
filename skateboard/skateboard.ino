@@ -18,10 +18,10 @@
 #include <VescUart.h> //Thank you to Gian Marcov for this awesome library: https://github.com/gianmarcov/arduino_vesc. Modified by me (Aaron Becker) to use SoftwareSerial instead of HardwareSerial
 #include "printf.h"
 
-//#include <Adafruit_Sensor.h>
-//#include <Adafruit_LSM303_U.h>
-//#include <Adafruit_BMP085_U.h>
-//#include <Adafruit_10DOF.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_LSM303_U.h>
+#include <Adafruit_BMP085_U.h>
+#include <Adafruit_10DOF.h>
 
 //Debug stuff (incompatible with vesc)
 
@@ -46,8 +46,9 @@ Servo ESC; //Create FSESC "servo" output
 #define ESC_NONBOOST_MAX 1700
 #define ESC_MAX 2000
 #define ESC_STOP (ESC_MIN+ESC_MAX)/2
+#define ESC_DEADZONE 50
 
-#define PPM_BRAKE_RATE 2 //in pulses per loop cycle (lol love those units)
+#define PPM_BRAKE_RATE 2 //in pulses per loop cycle (lol love those units yike)
 #define PPM_ACCEL_RATE_NONBOOST 1
 #define PPM_ACCEL_RATE_BOOST 5
 
@@ -68,15 +69,24 @@ const boolean unitsInKM = false; //are units in kilometers?
 float VBATT_MAX;
 float VBATT_MIN;
 unsigned long prevVUpdateMillis = 0;
-#define VUpdateMillis 500 //time between vesc updates
+#define VUpdateMillis 1000 //time between vesc updates
 
 #define initialVESCCheckDelay 5000
 boolean initialVESCCheck = false;
 
+//Vesc data
+struct VREALTIME {
+  float speed;
+  float distanceTravelled;
+  float inputVoltage;
+  float battPercent;
+};
+struct VREALTIME vesc_values_realtime;
+
 //Led pins/defs
 #define LED_DATA_PIN    3
 #define LED_TYPE    WS2811
-#define COLOR_ORDER GRB
+#define COLOR_ORDER BRG //I'm using a BRG led strip which is kinda wacky
 #define NUM_LEDS_GENERAL    32
 #define NUM_LEDS_BRAKE    6
 CRGB leds[NUM_LEDS_GENERAL+NUM_LEDS_BRAKE];
@@ -105,20 +115,35 @@ int ledState = LEDSTATE_INITCHASE;
 typedef enum {
   BRAKELIGHT_INIT = 0,
   BRAKELIGHT_NOTBRAKING = 1,
-  BRAKELIGHT_BRAKING = 2
+  BRAKELIGHT_BRAKING = 2,
+  BRAKELIGHT_TURNRIGHT = 3,
+  BRAKELIGHT_TURNLEFT = 4
 } BRAKELIGHT_STATES;
 int brakeLightState = BRAKELIGHT_INIT;
 
+#define BRAKELIGHT_TURNING_THRESHOLD 20 //Roll threshold for triggering turn signal, in degrees
+
 //IMU pins/defs
-//Adafruit_10DOF                dof   = Adafruit_10DOF();
-//Adafruit_LSM303_Accel_Unified accel = Adafruit_LSM303_Accel_Unified(30301);
-//Adafruit_LSM303_Mag_Unified   mag   = Adafruit_LSM303_Mag_Unified(30302);
-//Adafruit_BMP085_Unified       bmp   = Adafruit_BMP085_Unified(18001);
-//const float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA; //sea level pressure in HPA
+Adafruit_10DOF                dof   = Adafruit_10DOF();
+Adafruit_LSM303_Accel_Unified accel = Adafruit_LSM303_Accel_Unified(30301);
+Adafruit_LSM303_Mag_Unified   mag   = Adafruit_LSM303_Mag_Unified(30302);
+Adafruit_BMP085_Unified       bmp   = Adafruit_BMP085_Unified(18001);
+const float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA; //sea level pressure in HPA
 const char ACCEL_AXIS = 'x'; //axis that board accelerates along; used for accel math
 
 unsigned long prevSUpdateMillis = 0;
 #define SUpdateMillis 500
+
+//Gyro/accel/temp data
+struct SREALTIME {
+  float pitch;
+  float roll;
+  float heading;
+  float acceleration;
+  float temperature;
+  float altitude;
+};
+struct SREALTIME sensor_values_realtime;
 
 //Radio pins/defs
 RF24 radio(7, 8);
@@ -165,7 +190,7 @@ typedef enum {
   TONE = 14
 } RADIO_COMMANDS;
 
-double dataRx[3]; //double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes
+double dataRx[3]; //double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes (no dynamic payload)
 double dataTx[3];
 unsigned long lastHBTime = 0; //time when heartbeat signal was last recieved
 #define HBTimeoutMax 750 //max time between signals before board cuts the motors in ms
@@ -173,6 +198,10 @@ boolean radioListening = false;
 
 //General pins/defs
 int MASTER_STATE = 0;
+
+//The board should still be able to run if either the VESC or IMU is not present, since they are not essential to operation. These variables keep track of whether they're connected correctly
+boolean VESCOK = false; //needs to be false because it's set true if its ok later (5s delay to give vesc time to start up)
+boolean SENSOK = true; //needs to be true because it's immediately set false if it's bad
 
 void setup() {
   while (!Serial){;}
@@ -205,39 +234,40 @@ void setup() {
   FastLED.setBrightness(LED_BRIGHTNESS);
   FastLED.clear();
   for (int i=0; i<NUM_LEDS_GENERAL+NUM_LEDS_BRAKE; i++) {
-    leds[i] = CRGB::White; //set all leds to be off
+    leds[i] = CRGB::Black; //set all leds to be off
   }
   FastLED.show();
   DEBUG_PRINT(F("Setup leds: ok"));
 
   //Setup accelerometer
-  /*if(!accel.begin())
+  if(!accel.begin())
   {
     // There was a problem detecting the ADXL345 ... check your connections
     Serial.println(F("Setup accel: fail. not detected :("));
-    while(1);
+    SENSOK = false;
   }
   if(!mag.begin())
   {
     // There was a problem detecting the LSM303 ... check your connections
-    Serial.println("Setup mag: fail. not detected :(");
-    while(1);
+    Serial.println(F("Setup mag: fail. not detected :("));
+    SENSOK = false;
   }
   if(!bmp.begin())
   {
     // There was a problem detecting the BMP085 ... check your connections
-    Serial.print("Setup bmp: fail. not detected :(");
-    while(1);
-  }*/
-  DEBUG_PRINT("Setup accel/mag/bmp: ok");
+    Serial.print(F("Setup bmp: fail. not detected :("));
+    SENSOK = false;
+  }
+  DEBUG_PRINT(F("Setup accel/mag/bmp:"));
+  DEBUG_PRINT((SENSOK)?"ok":"failed");
   //Setup VESC UART
   DEBUG_PRINT(F("bef vesc init"));
   VUART.setSerialPort(&Serial);
   DEBUG_PRINT(F("aft vesc init"));
 
-  calculateRatios();
+  calculateRatios(); //Calculate VESC distance/speed ratios
 
-  DEBUG_PRINT(F("Setup VESC: ok")); //TODO add check if it's null or 0 so it can fail properly
+  DEBUG_PRINT(F("Initial VESC Setup: ok")); //TODO add check if it's null or 0 so it can fail properly
 
   transitionState(0);
 }
@@ -268,16 +298,13 @@ void loop() {
           transitionState(1);
         }
       }
-
       break;
     case 1: //standard operation
       radioRecieveMode();
       if (radio.available()) {
         resetDataRx();
         radio.read(&dataRx, sizeof(dataRx));
-        /*if (dataRx[0] != 200) {
-          DEBUG_PRINT("RECV COMM ID: "+String(dataRx[0]));
-        }*/
+
         if (dataRx[0] != HEARTBEAT && debug) {
           Serial.print(F("Got comm event #: "));
           Serial.println(dataRx[0]);
@@ -306,7 +333,7 @@ void loop() {
             }
             break;
           case HEARTBEAT: //heartbeat. if we get one, we should send one
-            // DEBUG_PRINT("controller hb recieved");
+            // DEBUG_PRINT(F("controller hb recieved"));
             radioTransmitMode();
             resetDataTx();
             dataTx[0] = HEARTBEAT;
@@ -351,7 +378,7 @@ void loop() {
           LEDdelay = LEDdelayLong;
           for (int i=0; i<NUM_LEDS_GENERAL; i++) {
             if ((i+ledPosition)%5 == 0) {
-              leds[i] = CRGB::Green;
+              leds[i] = CRGB::Blue;
             } else {
               leds[i] = CRGB::Black;
             }
@@ -360,55 +387,66 @@ void loop() {
           if (ledPosition > 4) {
             ledPosition = 0;
           }
-          FastLED.show();
           break;
         case LEDSTATE_RAINBOW: //rainbow
           LEDdelay = LEDdelayShort;
-        //TODO MAKE RAINBOW FADE IN/OUT BASED ON THROTTLE
-        //https://github.com/marmilicious/FastLED_examples/blob/master/rainbow_brightness_and_saturation.ino
+          //TODO MAKE RAINBOW FADE IN/OUT BASED ON THROTTLE
+          //https://github.com/marmilicious/FastLED_examples/blob/master/rainbow_brightness_and_saturation.ino
           fill_rainbow(leds, NUM_LEDS_GENERAL, millis()/10, 7);
-          FastLED.show();
           break;
         case LEDSTATE_CHGTHROTT: //color changes based on throttle (chaser again)
           LEDdelay = LEDdelayShort;
           int mappedVal = map(realPPM, ESC_MIN, ESC_MAX, 255, 0);
           for (int i=0; i<NUM_LEDS_GENERAL; i++) {
-            leds[i] = CRGB(mappedVal, 0, 255-mappedVal);
+            leds[i] = CRGB(mappedVal, 255-mappedVal, 0);
           }
-          FastLED.show();
           break;
       }
     }
 
     switch (brakeLightState) {
       case BRAKELIGHT_INIT:
-        for (int i=0; NUM_LEDS_BRAKE; i++) {
-          leds[NUM_LEDS_GENERAL+i] = CRGB::Green;
+        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Blue;
         }
         break;
       case BRAKELIGHT_BRAKING:
-        for (int i=0; NUM_LEDS_BRAKE; i++) {
+        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
           leds[NUM_LEDS_GENERAL+i] = CRGB::Red;
         }
         break;
       case BRAKELIGHT_NOTBRAKING:
-        for (int i=0; NUM_LEDS_BRAKE; i++) {
+        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
           leds[NUM_LEDS_GENERAL+i] = CRGB::Black;
         }
         break;
+      case BRAKELIGHT_TURNRIGHT:
+        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Black;
+        }
+        leds[NUM_LEDS_GENERAL+NUM_LEDS_BRAKE-1] = (checkLEDEquivalence(leds[NUM_LEDS_GENERAL+NUM_LEDS_BRAKE-1], CRGB::Black)) ? CRGB::Yellow : CRGB::Black; //Make last LED yellow
+        break;
+      case BRAKELIGHT_TURNLEFT:
+        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Black;
+        }
+        leds[NUM_LEDS_GENERAL] = (checkLEDEquivalence(leds[NUM_LEDS_GENERAL], CRGB::Black)) ? CRGB::Yellow : CRGB::Black; //Make last LED yellow
+        break;
     }
+
+    FastLED.show(); //Actually tell library to send LED state to LEDs
   }
 
   if (currentMillis-lastHBTime>=HBTimeoutMax && MASTER_STATE == 1) { //have we lost connection with the controller while operating normally? welp then we should prolly cut motors
     transitionState(2);
   }
 
-  if (currentMillis-prevVUpdateMillis >= VUpdateMillis && MASTER_STATE == 1) { //Time for VESC update
+  if (currentMillis-prevVUpdateMillis >= VUpdateMillis && MASTER_STATE == 1 && VESCOK) { //Time for VESC update
     prevVUpdateMillis = currentMillis;
     sendVESCData();    
   }
 
-  if (currentMillis-prevSUpdateMillis >= SUpdateMillis && MASTER_STATE == 1) { //Time for sensor update
+  if (currentMillis-prevSUpdateMillis >= SUpdateMillis && MASTER_STATE == 1 && SENSOK) { //Time for sensor update
     prevSUpdateMillis = currentMillis;
     sendSensorData();
   }
@@ -416,20 +454,20 @@ void loop() {
   if (currentMillis>initialVESCCheckDelay && !initialVESCCheck) { //VESC status check
     initialVESCCheck = true;
     if (VUART.getVescValues()) {
-      for (int i=0; i<NUM_LEDS_GENERAL; i++) {
-        leds[i] = CRGB::Blue; //set led to be green to indicate success vesc
-      }
-      FastLED.show();
-      DEBUG_PRINT(F("VESC comm 1 ok"));
+      VESCOK = true;
+      DEBUG_PRINT(F("VESC intialComm: ok"));
       delay(500);
     } else {
-      for (int i=0; i<NUM_LEDS_GENERAL; i++) {
-        leds[i] = CRGB::Red; //set led to be red to indicate failure vesc
-      }
-      FastLED.show();
-      DEBUG_PRINT(F("VESC comm 1 err"));
+      VESCOK = false;
+      DEBUG_PRINT(F("VESC initialComm: err"));
       delay(500);
     }
+
+    for (int i=0; i<NUM_LEDS_GENERAL; i++) {
+      leds[i] = VESCOK?CRGB::Green:CRGB::Red; //set led to be green or red to indicate success vesc
+    } //woah bois thats one hell of a oneliner
+    FastLED.show();
+    delay(500);
   }
 
   updateESC(); //Update ESC with throttle value
@@ -442,13 +480,13 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
 }
 
 void calculateRatios() { //seperate function to save ram
-  // DEBUG_PRINT("vuart MC begin");
+  // DEBUG_PRINT(F("vuart MC begin"));
   // mc_configuration VCONFIG = VUART.getMotorConfiguration(); //takes all data directly from VESC
   // float gearRatio = VCONFIG.si_gear_ratio;
   // int wheelDiameter = VCONFIG.si_wheel_diameter;
   // int motorPoles = VCONFIG.si_motor_poles;
   // int batteryCells = VCONFIG.si_battery_cells;
-  // DEBUG_PRINT("vuart MC done");
+  // DEBUG_PRINT(F("vuart MC done"));
 
 
   //Hardcoded lol because oof old vesc library
@@ -458,7 +496,7 @@ void calculateRatios() { //seperate function to save ram
   int wheelDiameter = 90; //in mm
   int motorPoles = 14;
   int batteryCells = 10;
-  DEBUG_PRINT(F("Vrat: hard ok"));
+  DEBUG_PRINT(F("Vratios: hard ok"));
 
   //The following code yoinked basically directly from https://github.com/SolidGeek/nRF24-Esk8-Remote/blob/master/transmitter/transmitter.ino. Thanks SolidGeek :)
   VRATIO_RPM_SPEED = (gearRatio * 60.0 * (float)wheelDiameter * 3.14156) / (((float)motorPoles / 2.0) * 1000000.0); // ERPM to Km/h
@@ -468,71 +506,65 @@ void calculateRatios() { //seperate function to save ram
   VBATT_MIN = (float)batteryCells*3.2; //assuming min charge of 3.2V per cell
 }
 
+void updateVESCData() {
+  if (VUART.getVescValues()) {
+    DEBUG_PRINT(F("Units in "));
+    DEBUG_PRINT((unitsInKM?"kilometers":"miles"));
+    vesc_values_realtime.distanceTravelled = (float)VUART.data.tachometerAbs*VRATIO_TACHO_KM*(unitsInKM?VRATIO_KM_MI:1);
+    DEBUG_PRINT(F("Distance travelled (from tachometer): "));
+    DEBUG_PRINT(String(vesc_values_realtime.distanceTravelled));
+
+    vesc_values_realtime.speed = (float)VUART.data.rpm*VRATIO_RPM_SPEED*(unitsInKM?VRATIO_KM_MI:1);
+    DEBUG_PRINT(F("Current speed (from rpm): "));
+    DEBUG_PRINT(String(vesc_values_realtime.speed));
+
+    vesc_values_realtime.inputVoltage = (float)VUART.data.inpVoltage;
+    DEBUG_PRINT(F("Current inpVoltage: "));
+    DEBUG_PRINT(String(vesc_values_realtime.inputVoltage));
+
+    float battPercent = mapFloat(vesc_values_realtime.inputVoltage, VBATT_MIN, VBATT_MAX, 0, 100);
+    vesc_values_realtime.battPercent = (battPercent < VBATT_MIN) ? VBATT_MIN : (battPercent > VBATT_MAX) ? VBATT_MAX : battPercent;
+    DEBUG_PRINT(F("Current battPercent: "));
+    DEBUG_PRINT(String(vesc_values_realtime.battPercent));
+  } else {
+    DEBUG_PRINT(F("Vesc data get fail"));
+    vesc_values_realtime.distanceTravelled = -1.0;
+    vesc_values_realtime.speed = -1.0;
+    vesc_values_realtime.inputVoltage = -1.0;
+    vesc_values_realtime.battPercent = -1.0;
+  }
+}
+
 void sendVESCData() {
   radioTransmitMode();
   resetDataTx();
   //ID 12: VESC data [id, value]. ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is batt percent
-  float distance, speed, inpVoltage, battPercent;
-
-  if (VUART.getVescValues()) {
-    DEBUG_PRINT(F("Units in "));
-    DEBUG_PRINT((unitsInKM?"kilometers":"miles"));
-    distance = (float)VUART.data.tachometerAbs*VRATIO_TACHO_KM*(unitsInKM?VRATIO_KM_MI:1);
-    DEBUG_PRINT(F("Distance travelled (from tachometer): "));
-    DEBUG_PRINT(String(distance));
-
-    speed = (float)VUART.data.rpm*VRATIO_RPM_SPEED*(unitsInKM?VRATIO_KM_MI:1);
-    DEBUG_PRINT(F("Current speed (from rpm): "));
-    DEBUG_PRINT(String(speed));
-
-    inpVoltage = (float)VUART.data.inpVoltage;
-    DEBUG_PRINT(F("Current inpVoltage: "));
-    DEBUG_PRINT(String(inpVoltage));
-
-    battPercent = mapFloat(inpVoltage, VBATT_MIN, VBATT_MAX, 0, 100);
-    battPercent = (battPercent < VBATT_MIN) ? VBATT_MIN : (battPercent > VBATT_MAX) ? VBATT_MAX : battPercent;
-    DEBUG_PRINT(F("Current battPercent: "));
-    DEBUG_PRINT(String(battPercent));
-  } else {
-    DEBUG_PRINT(F("Vesc data get fail"));
-    distance = -1.0;
-    speed = -1.0;
-    inpVoltage = -1.0;
-    battPercent = -1.0;
-  }
-
   dataTx[0] = 12;
   dataTx[1] = 0;
-  dataTx[2] = speed;
+  dataTx[2] = vesc_values_realtime.speed;
   radio.write(&dataTx, sizeof(dataTx));
 
   dataTx[1] = 1;
-  dataTx[2] = distance;
+  dataTx[2] = vesc_values_realtime.distanceTravelled;
   radio.write(&dataTx, sizeof(dataTx)); 
   
   dataTx[1] = 2;
-  dataTx[2] = inpVoltage;
+  dataTx[2] = vesc_values_realtime.inputVoltage;
   radio.write(&dataTx, sizeof(dataTx)); 
 
   dataTx[1] = 3;
-  dataTx[2] = battPercent;
+  dataTx[2] = vesc_values_realtime.battPercent;
   radio.write(&dataTx, sizeof(dataTx)); 
 }
 
-void sendSensorData() {
-  return;
-  radioTransmitMode();
-  resetDataTx();
-
+void updateSensorData() {
   //Define variables to store accel events
-  /*sensors_event_t accel_event;
+  sensors_event_t accel_event;
   sensors_event_t mag_event;
   sensors_event_t bmp_event;
-  sensors_vec_t   orientation;*/
-  //Floats to store data
-  float pitch, roll, heading, acceleration, temperature, altitude = -1;
+  sensors_vec_t   orientation;
 
-  /*accel.getEvent(&accel_event);
+  accel.getEvent(&accel_event);
   if (!dof.accelGetOrientation(&accel_event, &orientation)) {
     DEBUG_PRINT(F("Error getting accel orientation"));
     return;
@@ -545,65 +577,86 @@ void sendSensorData() {
 
   switch (ACCEL_AXIS) {
     case 'x':
-      acceleration = accel_event.acceleration.x;
+      sensor_values_realtime.acceleration = accel_event.acceleration.x;
       break;
     case 'y':
-      acceleration = accel_event.acceleration.y;
+      sensor_values_realtime.acceleration = accel_event.acceleration.y;
       break;
     case 'z':
-      acceleration = accel_event.acceleration.z;
+      sensor_values_realtime.acceleration = accel_event.acceleration.z;
       break;
   }
   DEBUG_PRINT(F("Acceleration along direction of travel (axis, value):"));
   DEBUG_PRINT(ACCEL_AXIS);
-  DEBUG_PRINT(acceleration);
+  DEBUG_PRINT(sensor_values_realtime.acceleration);
 
-  roll = orientation.roll;
+  sensor_values_realtime.roll = orientation.roll;
   DEBUG_PRINT(F("Roll value: "));
-  DEBUG_PRINT(roll);
-  pitch = orientation.pitch;
+  DEBUG_PRINT(sensor_values_realtime.roll);
+  sensor_values_realtime.pitch = orientation.pitch;
   DEBUG_PRINT(F("Pitch value: "));
-  DEBUG_PRINT(pitch);
-  heading = orientation.heading;
+  DEBUG_PRINT(sensor_values_realtime.pitch);
+  sensor_values_realtime.heading = orientation.heading;
   DEBUG_PRINT(F("Heading value: "));
-  DEBUG_PRINT(heading);
+  DEBUG_PRINT(sensor_values_realtime.heading);
 
   bmp.getEvent(&bmp_event);
   if (!bmp_event.pressure) {
-    DEBUG_PRINT(F("Error getting bmp pressure"));
-    return;
+    DEBUG_PRINT(F("Error getting bmp pressure (not calculating altitude)"));
+  } else {
+    bmp.getTemperature(&sensor_values_realtime.temperature);
+    sensor_values_realtime.altitude = bmp.pressureToAltitude(seaLevelPressure, bmp_event.pressure, sensor_values_realtime.temperature);
+    DEBUG_PRINT(F("Temperature value: "));
+    DEBUG_PRINT(sensor_values_realtime.temperature);
+    DEBUG_PRINT(F("Altitude value: "));
+    DEBUG_PRINT(sensor_values_realtime.altitude);
   }
-  bmp.getTemperature(&temperature);
-  altitude = bmp.pressureToAltitude(seaLevelPressure, bmp_event.pressure, temperature);
-  DEBUG_PRINT(F("Temperature value: "));
-  DEBUG_PRINT(temperature);
-  DEBUG_PRINT(F("Altitude value: "));
-  DEBUG_PRINT(altitude);*/
+}
 
+void updateBrakelightTurnState() {
+  if (brakeLightState != BRAKELIGHT_BRAKING) { //Ensure that we're not actually braking
+    int roll = sensor_values_realtime.roll-180;
+    if (roll > BRAKELIGHT_TURNING_THRESHOLD) {
+      brakeLightState = BRAKELIGHT_TURNRIGHT;
+    } else if (sensor_values_realtime.roll < -BRAKELIGHT_TURNING_THRESHOLD) {
+      brakeLightState = BRAKELIGHT_TURNLEFT;
+    } else {
+      brakeLightState = BRAKELIGHT_NOTBRAKING;
+    }
+  }
+}
+
+boolean checkLEDEquivalence(CRGB a, CRGB b) {
+  return (a.red == b.red && a.green == b.green && a.blue == b.blue);
+}
+
+void sendSensorData() {
+  radioTransmitMode();
+  resetDataTx();
   //ID 13: Sensor data [id, value]. ID 0 is pitch, ID 1 is roll, ID 2 is heading, ID 3 is acceleration, ID 4 is temperature, ID 5 is altitude
   dataTx[0] = 13;
   dataTx[1] = 0;
-  dataTx[2] = pitch;
+  dataTx[2] = sensor_values_realtime.pitch;
   radio.write(&dataTx, sizeof(dataTx));
 
   dataTx[1] = 1;
-  dataTx[2] = roll;
+  dataTx[2] = sensor_values_realtime.roll;
   radio.write(&dataTx, sizeof(dataTx));
 
   dataTx[1] = 2;
-  dataTx[2] = heading;
+  dataTx[2] = sensor_values_realtime.heading;
   radio.write(&dataTx, sizeof(dataTx));
 
   dataTx[1] = 3;
-  dataTx[2] = acceleration;
+  dataTx[2] = sensor_values_realtime.acceleration;
   radio.write(&dataTx, sizeof(dataTx));
   
   dataTx[1] = 4;
-  dataTx[2] = temperature;
+  dataTx[2] = sensor_values_realtime.temperature;
   radio.write(&dataTx, sizeof(dataTx)); 
 
   dataTx[1] = 5;
-  dataTx[2] = altitude;
+  dataTx[2] = sensor_values_realtime.altitude;
   radio.write(&dataTx, sizeof(dataTx));
 }
 
@@ -631,11 +684,11 @@ void updateESC() {
   if (throttleEnabled) {
     realRAW = constrain(realRAW, HALL_MIN, HALL_MAX); //constrain raw value
     int targetPPM = map(realRAW, HALL_MIN, HALL_MAX, ESC_MAX, ESC_MIN); //calculate ppm
-    if (abs(targetPPM-ESC_STOP) < 60) {
+    if (abs(targetPPM-ESC_STOP) < ESC_DEADZONE) {
       targetPPM = ESC_STOP;
     }
 
-    brakeLightState = (targetPPM < ESC_STOP) ? BRAKELIGHT_BRAKING : BRAKELIGHT_NOTBRAKING; //set brake light state based on whether we're below ESC_STOP threshold
+    brakeLightState = (targetPPM < ESC_STOP) ? BRAKELIGHT_BRAKING : (brakeLightState != BRAKELIGHT_TURNLEFT && brakeLightState != BRAKELIGHT_TURNRIGHT) ? BRAKELIGHT_NOTBRAKING : brakeLightState; //set brake light state based on whether we're below ESC_STOP threshold
 
     if (realPPM < targetPPM) {
       realPPM += (targetPPM < ESC_STOP) ? PPM_ACCEL_RATE_BOOST : (boostEnabled) ? PPM_ACCEL_RATE_BOOST : PPM_ACCEL_RATE_NONBOOST; //essentially, stop slowing down at boost rate (if less than stop pos). Otherwise defer to boost rate
@@ -644,9 +697,9 @@ void updateESC() {
     }
     realPPM = constrain(realPPM, ESC_MIN, ESC_MAX); //make sure we're within limits for safety even tho it should never be an issue
 
-    /*Serial.print("Target: ");
+    /*Serial.print(F("Target: "));
     Serial.print(targetPPM);
-    Serial.print(" real: ");
+    Serial.print(F(" real: "));
     Serial.println(realPPM);*/
   } else {
     realPPM = ESC_STOP;

@@ -8,7 +8,23 @@
 ****************
 
   By Aaron Becker
-  V2 Dec 2019/Jan 2020
+  Special Version V2 Dec 2019/Jan 2020
+*/
+
+/*
+
+VERY IMPORTANT:
+
+This version of the skateboard V2 code is very heavily optimized in order to fit and run correctly on a regular Arduino Nano.
+In order to accomplish this, there's some features missing:
+  - Active sensor data from IMU being sent to remote
+  - Turn indication/blinking turn lights
+  - Proper global structs to store realtime data
+  - Some debug features (can be uncommented)
+  - Whatever I decide to add to the main skateboard file in the future!
+
+It's highly recommended to upgrade to an Arduino Nano Every: https://store.arduino.cc/usa/nano-every-pack
+This board has much more RAM and storage space to enable me to add more features :)
 */
 
 #include <Servo.h>
