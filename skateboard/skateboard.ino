@@ -15,7 +15,7 @@
 #include <Wire.h>
 #include <FastLED.h>
 #include <RF24.h>
-#include <VescUart.h> //Thank you to Gian Marcov for this awesome library: https://github.com/gianmarcov/arduino_vesc. Modified by me (Aaron Becker) to use SoftwareSerial instead of HardwareSerial
+//#include <VescUart.h> //Thank you to Gian Marcov for this awesome library: https://github.com/gianmarcov/arduino_vesc. Modified by me (Aaron Becker) to use SoftwareSerial instead of HardwareSerial
 #include "printf.h"
 
 #include <Adafruit_Sensor.h>
@@ -25,7 +25,7 @@
 
 //Debug stuff (incompatible with vesc)
 
-#define DEBUG
+//#define DEBUG
 
 
 #ifdef DEBUG
@@ -46,7 +46,7 @@ Servo ESC; //Create FSESC "servo" output
 #define ESC_NONBOOST_MAX 1700
 #define ESC_MAX 2000
 #define ESC_STOP (ESC_MIN+ESC_MAX)/2
-#define ESC_DEADZONE 50
+#define ESC_DEADZONE 100
 
 #define PPM_BRAKE_RATE 2 //in pulses per loop cycle (lol love those units yike)
 #define PPM_ACCEL_RATE_NONBOOST 1
@@ -61,7 +61,7 @@ unsigned long prevSpeedMillis = 0;
 boolean throttleEnabled = false;
 boolean boostEnabled = false;
 
-VescUart VUART;
+/*VescUart VUART;
 float VRATIO_RPM_SPEED;
 float VRATIO_TACHO_KM;
 float VRATIO_KM_MI;
@@ -82,13 +82,13 @@ struct VREALTIME {
   float battPercent;
 };
 struct VREALTIME vesc_values_realtime;
-
+*/
 //Led pins/defs
 #define LED_DATA_PIN    3
 #define LED_TYPE    WS2811
 #define COLOR_ORDER BRG //I'm using a BRG led strip which is kinda wacky
 #define NUM_LEDS_GENERAL    32
-#define NUM_LEDS_BRAKE    6
+#define NUM_LEDS_BRAKE    2
 CRGB leds[NUM_LEDS_GENERAL+NUM_LEDS_BRAKE];
 #define LED_BRIGHTNESS 128
 #define LED_FPS 120
@@ -121,7 +121,10 @@ typedef enum {
 } BRAKELIGHT_STATES;
 int brakeLightState = BRAKELIGHT_INIT;
 
-#define BRAKELIGHT_TURNING_THRESHOLD 20 //Roll threshold for triggering turn signal, in degrees
+boolean BRAKELIGHT_SETROLLOFFSET = false;
+float BRAKELIGHT_ROLL_OFFSET = 0;
+boolean BRAKELIGHT_TURNLIGHTON = false;
+const float BRAKELIGHT_TURNING_THRESHOLD = 2.0; //Roll threshold for triggering turn signal, in degrees
 
 //IMU pins/defs
 Adafruit_10DOF                dof   = Adafruit_10DOF();
@@ -132,7 +135,7 @@ const float seaLevelPressure = SENSORS_PRESSURE_SEALEVELHPA; //sea level pressur
 const char ACCEL_AXIS = 'x'; //axis that board accelerates along; used for accel math
 
 unsigned long prevSUpdateMillis = 0;
-#define SUpdateMillis 500
+#define SUpdateMillis 200
 
 //Gyro/accel/temp data
 struct SREALTIME {
@@ -261,13 +264,13 @@ void setup() {
   DEBUG_PRINT(F("Setup accel/mag/bmp:"));
   DEBUG_PRINT((SENSOK)?"ok":"failed");
   //Setup VESC UART
-  DEBUG_PRINT(F("bef vesc init"));
+  /*DEBUG_PRINT(F("bef vesc init"));
   VUART.setSerialPort(&Serial);
-  DEBUG_PRINT(F("aft vesc init"));
+  DEBUG_PRINT(F("aft vesc init"));*/
 
-  calculateRatios(); //Calculate VESC distance/speed ratios
+  //calculateRatios(); //Calculate VESC distance/speed ratios
 
-  DEBUG_PRINT(F("Initial VESC Setup: ok")); //TODO add check if it's null or 0 so it can fail properly
+  //DEBUG_PRINT(F("Initial VESC Setup: ok")); //TODO add check if it's null or 0 so it can fail properly
 
   transitionState(0);
 }
@@ -404,7 +407,7 @@ void loop() {
       }
     }
 
-    switch (brakeLightState) {
+    switch (brakeLightState) { //Only for the cases that need fast updating, i.e. safety critical lights like brake
       case BRAKELIGHT_INIT:
         for (int i=0; i<NUM_LEDS_BRAKE; i++) {
           leds[NUM_LEDS_GENERAL+i] = CRGB::Blue;
@@ -420,18 +423,6 @@ void loop() {
           leds[NUM_LEDS_GENERAL+i] = CRGB::Black;
         }
         break;
-      case BRAKELIGHT_TURNRIGHT:
-        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
-          leds[NUM_LEDS_GENERAL+i] = CRGB::Black;
-        }
-        leds[NUM_LEDS_GENERAL+NUM_LEDS_BRAKE-1] = (checkLEDEquivalence(leds[NUM_LEDS_GENERAL+NUM_LEDS_BRAKE-1], CRGB::Black)) ? CRGB::Yellow : CRGB::Black; //Make last LED yellow
-        break;
-      case BRAKELIGHT_TURNLEFT:
-        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
-          leds[NUM_LEDS_GENERAL+i] = CRGB::Black;
-        }
-        leds[NUM_LEDS_GENERAL] = (checkLEDEquivalence(leds[NUM_LEDS_GENERAL], CRGB::Black)) ? CRGB::Yellow : CRGB::Black; //Make last LED yellow
-        break;
     }
 
     FastLED.show(); //Actually tell library to send LED state to LEDs
@@ -441,17 +432,43 @@ void loop() {
     transitionState(2);
   }
 
-  if (currentMillis-prevVUpdateMillis >= VUpdateMillis && MASTER_STATE == 1 && VESCOK) { //Time for VESC update
+  /*if (currentMillis-prevVUpdateMillis >= VUpdateMillis && MASTER_STATE == 1 && VESCOK) { //Time for VESC update
     prevVUpdateMillis = currentMillis;
+    updateVESCData();
     sendVESCData();    
-  }
+  }*/
 
   if (currentMillis-prevSUpdateMillis >= SUpdateMillis && MASTER_STATE == 1 && SENSOK) { //Time for sensor update
     prevSUpdateMillis = currentMillis;
+    updateSensorData();
+    updateBrakelightTurnState();
     sendSensorData();
+
+    switch (brakeLightState) { //These need to only update once every sensorcheck ms
+      case BRAKELIGHT_TURNRIGHT:
+        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Black;
+        }
+        leds[NUM_LEDS_GENERAL+NUM_LEDS_BRAKE-1] = (BRAKELIGHT_TURNLIGHTON) ? CRGB::Orange : CRGB::Black; //Make last LED orange
+        BRAKELIGHT_TURNLIGHTON = !BRAKELIGHT_TURNLIGHTON;
+        break;
+      case BRAKELIGHT_TURNLEFT:
+        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Black;
+        }
+        leds[NUM_LEDS_GENERAL] = (BRAKELIGHT_TURNLIGHTON) ? CRGB::Orange : CRGB::Black; //Make first LED orange
+        BRAKELIGHT_TURNLIGHTON = !BRAKELIGHT_TURNLIGHTON;
+        break;
+    }
+    FastLED.show(); //Send state to LEDs
+
+    if (debug) {
+      Serial.println("BrakeLightState:");
+      Serial.println(brakeLightState);
+    }
   }
 
-  if (currentMillis>initialVESCCheckDelay && !initialVESCCheck) { //VESC status check
+  /*if (currentMillis>initialVESCCheckDelay && !initialVESCCheck) { //VESC status check
     initialVESCCheck = true;
     if (VUART.getVescValues()) {
       VESCOK = true;
@@ -468,7 +485,7 @@ void loop() {
     } //woah bois thats one hell of a oneliner
     FastLED.show();
     delay(500);
-  }
+  }*/
 
   updateESC(); //Update ESC with throttle value
 
@@ -478,7 +495,7 @@ void loop() {
 float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
-
+/*
 void calculateRatios() { //seperate function to save ram
   // DEBUG_PRINT(F("vuart MC begin"));
   // mc_configuration VCONFIG = VUART.getMotorConfiguration(); //takes all data directly from VESC
@@ -556,7 +573,7 @@ void sendVESCData() {
   dataTx[2] = vesc_values_realtime.battPercent;
   radio.write(&dataTx, sizeof(dataTx)); 
 }
-
+*/
 void updateSensorData() {
   //Define variables to store accel events
   sensors_event_t accel_event;
@@ -614,20 +631,24 @@ void updateSensorData() {
 }
 
 void updateBrakelightTurnState() {
+  if (!BRAKELIGHT_SETROLLOFFSET) {
+    BRAKELIGHT_SETROLLOFFSET = true;
+    BRAKELIGHT_ROLL_OFFSET = sensor_values_realtime.roll;
+  }
   if (brakeLightState != BRAKELIGHT_BRAKING) { //Ensure that we're not actually braking
-    int roll = sensor_values_realtime.roll-180;
-    if (roll > BRAKELIGHT_TURNING_THRESHOLD) {
+    float adjRoll = sensor_values_realtime.roll-BRAKELIGHT_ROLL_OFFSET;
+    if (debug) {
+      Serial.println("BLS Roll adjusted:");
+      Serial.println(String(adjRoll).substring(0,6));
+    }
+    if (adjRoll > BRAKELIGHT_TURNING_THRESHOLD) {
       brakeLightState = BRAKELIGHT_TURNRIGHT;
-    } else if (sensor_values_realtime.roll < -BRAKELIGHT_TURNING_THRESHOLD) {
+    } else if (adjRoll < -BRAKELIGHT_TURNING_THRESHOLD) {
       brakeLightState = BRAKELIGHT_TURNLEFT;
     } else {
       brakeLightState = BRAKELIGHT_NOTBRAKING;
     }
   }
-}
-
-boolean checkLEDEquivalence(CRGB a, CRGB b) {
-  return (a.red == b.red && a.green == b.green && a.blue == b.blue);
 }
 
 void sendSensorData() {
