@@ -696,6 +696,7 @@ void transitionState(int newState) {
       DEBUG_PRINT(F("Uhoh we've lost connection to the remote :("));
       realRAW = HALL_STOP; //set target to 0 speed to bring us back down to 0 speed
       ledState = LEDSTATE_INITCHASE; //go back into disconnected mode
+      brakeLightState = BRAKELIGHT_INIT;
       realPPM = ESC_STOP; //set target to 0 speed to bring us back down to 0 speed
       break;
   }  
