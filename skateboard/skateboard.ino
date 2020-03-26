@@ -25,7 +25,7 @@
 
 //Debug stuff (incompatible with vesc)
 
-#define DEBUG
+//#define DEBUG
 
 
 #ifdef DEBUG
@@ -50,7 +50,7 @@ Servo ESC; //Create FSESC "servo" output
 
 #define PPM_BRAKE_RATE 2 //in pulses per loop cycle (lol love those units yike)
 #define PPM_ACCEL_RATE_NONBOOST 1
-#define PPM_ACCEL_RATE_BELOW_ZERO 5 //You want a more "snappy" feel for coming out of braking, so a special rate variable is created
+#define PPM_ACCEL_RATE_BOOST 5
 
 #define HALL_MIN 0
 #define HALL_MAX 255
@@ -59,9 +59,7 @@ int realPPM = ESC_STOP;
 int realRAW = 0;
 unsigned long prevSpeedMillis = 0;
 boolean throttleEnabled = false;
-boolean turnLightsEnabled = false;
-
-boolean oldTurnLightsEnabled = false; //Keep track of prev state of turnLightsEnabled so that we can catch rising/falling events
+boolean boostEnabled = false;
 
 /*VescUart VUART;
 float VRATIO_RPM_SPEED;
@@ -89,9 +87,9 @@ struct VREALTIME vesc_values_realtime;
 #define LED_DATA_PIN    3
 #define LED_TYPE    WS2811
 #define COLOR_ORDER BRG //I'm using a BRG led strip which is kinda wacky
-#define NUM_LEDS_BOARD    32
+#define NUM_LEDS_GENERAL    32
 #define NUM_LEDS_BRAKE    2
-CRGB leds[NUM_LEDS_BOARD+NUM_LEDS_BRAKE];
+CRGB leds[NUM_LEDS_GENERAL+NUM_LEDS_BRAKE];
 #define LED_BRIGHTNESS 128
 #define LED_FPS 120
 unsigned long prevLEDMillis = 0;
@@ -169,7 +167,7 @@ ID 200: heartbeat. Data: [0, 0]
 ID 1: ThrottleVal update. Data: [raw value, 0]
 ID 2: ThrottleSW update. Data: [sw, 0]
 ID 3: LED mode update. Data: [ledMode (0, 1, 2), 0]
-ID 4: TurnLightsEnabled switch update. Data: [turnLightsEnabled (0, 1), 0]
+ID 4: BOOST switch update. Data: [boostMode (0, 1), 0]
 
 ID 10: Ask controller to send state of all peripherals
 ID 11: Controller force screen update
@@ -185,7 +183,7 @@ typedef enum {
   THROTTLE_VAL = 1,
   THROTTLE_SW = 2,
   LEDMODE = 3,
-  TURNLIGHTENABLE = 4,
+  BOOSTMODE = 4,
 
   //Board -> Controller
   SENDALLDATA = 10,
@@ -235,13 +233,12 @@ void setup() {
   DEBUG_PRINT(F("Setup radio: ok"));
 
   //Setup LEDS
-  FastLED.addLeds<LED_TYPE,LED_DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS_BOARD+NUM_LEDS_BRAKE).setCorrection(TypicalLEDStrip);
+  FastLED.addLeds<LED_TYPE,LED_DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS_GENERAL+NUM_LEDS_BRAKE).setCorrection(TypicalLEDStrip);
   FastLED.setBrightness(LED_BRIGHTNESS);
   FastLED.clear();
-  
-  //Make sure we're displaying nothing
-  writeBoardLEDSSolid(CRGB::Black);
-  writeBrakeLEDSSolid(CRGB::Black);
+  for (int i=0; i<NUM_LEDS_GENERAL+NUM_LEDS_BRAKE; i++) {
+    leds[i] = CRGB::Black; //set all leds to be off
+  }
   FastLED.show();
   DEBUG_PRINT(F("Setup leds: ok"));
 
@@ -266,7 +263,6 @@ void setup() {
   }
   DEBUG_PRINT(F("Setup accel/mag/bmp:"));
   DEBUG_PRINT((SENSOK)?"ok":"failed");
-
   //Setup VESC UART
   /*DEBUG_PRINT(F("bef vesc init"));
   VUART.setSerialPort(&Serial);
@@ -276,19 +272,6 @@ void setup() {
 
   //DEBUG_PRINT(F("Initial VESC Setup: ok")); //TODO add check if it's null or 0 so it can fail properly
 
-  //Now that everything's setup...
-  //GIVE rider a visual indication as to whether board is functioning ok. First blink: are sensors initialized? Second blink: is VESC ok?
-  writeBrakeLEDSSolid((SENSOK)?CRGB::Green:CRGB::Red); //This is a fun one-liner to write, if sensOK then write CRGB green otherwise red
-  FastLED.show();
-  delay(100);
-  writeBrakeLEDSSolid(CRGB::Black);
-  FastLED.show();
-  delay(100);
-  writeBrakeLEDSSolid((VESCOK)?CRGB::Green:CRGB::Red);
-  FastLED.show();
-  delay(100);
-
-  //Goto state 0; waiting for connection
   transitionState(0);
 }
 
@@ -340,18 +323,13 @@ void loop() {
           case THROTTLE_SW:
             throttleEnabled = dataRx[1];
             break;
-          case TURNLIGHTENABLE:
-            turnLightsEnabled = dataRx[1];
-
-            //Small bit of logic to reupdate offset value on rising edge
-            if (turnLightsEnabled) {
-              BRAKELIGHT_ROLL_OFFSET = sensor_values_realtime.roll;
-            }
+          case BOOSTMODE:
+            boostEnabled = dataRx[1];
             break;
           case LEDMODE: //2 is led mode update
-            if (dataRx[1] <= 3) { //sanity check for max LED state
-              if (dataRx[1] == 0) { //If it's zero; clear everything and write
-                writeBoardLEDSSolid(CRGB::Black);
+            if (dataRx[1] <= 3) { //sanity check
+              if (dataRx[1] == 0) {
+                FastLED.clear();
                 FastLED.show();
               }
               ledState = dataRx[1];
@@ -394,7 +372,6 @@ void loop() {
   }
 
   unsigned long currentMillis = millis();
-  int mappedVal;
   
   if (currentMillis-prevLEDMillis>=LEDdelay) { //make sure the leds are enabled
     prevLEDMillis = currentMillis;
@@ -402,7 +379,7 @@ void loop() {
       switch (ledState) {
         case LEDSTATE_INITCHASE: //blue chase
           LEDdelay = LEDdelayLong;
-          for (int i=0; i<NUM_LEDS_BOARD; i++) {
+          for (int i=0; i<NUM_LEDS_GENERAL; i++) {
             if ((i+ledPosition)%5 == 0) {
               leds[i] = CRGB::Blue;
             } else {
@@ -416,33 +393,35 @@ void loop() {
           break;
         case LEDSTATE_RAINBOW: //rainbow
           LEDdelay = LEDdelayShort;
+          //TODO MAKE RAINBOW FADE IN/OUT BASED ON THROTTLE
           //https://github.com/marmilicious/FastLED_examples/blob/master/rainbow_brightness_and_saturation.ino
-          //Fill internal LED array w/rainbow
-          fill_rainbow(leds, NUM_LEDS_BOARD, millis()/10, 7);
-          
-          mappedVal = map(realPPM, ESC_MIN, ESC_MAX, 128, 0); //Fade from 128 to 0 based on dthrott
-          CRGB tintAmnt = CRGB(mappedVal, mappedVal, mappedVal);
-          for (int i=0; i<NUM_LEDS_BOARD; i++) {
-            leds[i] += tintAmnt;
-          }
+          fill_rainbow(leds, NUM_LEDS_GENERAL, millis()/10, 7);
           break;
         case LEDSTATE_CHGTHROTT: //color changes based on throttle (chaser again)
           LEDdelay = LEDdelayShort;
-          mappedVal = map(realPPM, ESC_MIN, ESC_MAX, 255, 0);
-          writeBoardLEDSSolid(CRGB(mappedVal, 255-mappedVal, 0));
+          int mappedVal = map(realPPM, ESC_MIN, ESC_MAX, 255, 0);
+          for (int i=0; i<NUM_LEDS_GENERAL; i++) {
+            leds[i] = CRGB(mappedVal, 255-mappedVal, 0);
+          }
           break;
       }
     }
 
     switch (brakeLightState) { //Only for the cases that need fast updating, i.e. safety critical lights like brake
       case BRAKELIGHT_INIT:
-        writeBrakeLEDSSolid(CRGB::Blue);
+        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Blue;
+        }
         break;
       case BRAKELIGHT_BRAKING:
-        writeBrakeLEDSSolid(CRGB::Red);
+        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Red;
+        }
         break;
       case BRAKELIGHT_NOTBRAKING:
-        writeBrakeLEDSSolid(CRGB::Black);
+        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Black;
+        }
         break;
     }
 
@@ -467,13 +446,17 @@ void loop() {
 
     switch (brakeLightState) { //These need to only update once every sensorcheck ms
       case BRAKELIGHT_TURNRIGHT:
-        writeBrakeLEDSSolid(CRGB::Black); //Start by making all brake leds blank (internal state)
-        leds[NUM_LEDS_BOARD+NUM_LEDS_BRAKE-1] = (BRAKELIGHT_TURNLIGHTON) ? CRGB::Orange : CRGB::Black; //Make last LED orange
+        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Black;
+        }
+        leds[NUM_LEDS_GENERAL+NUM_LEDS_BRAKE-1] = (BRAKELIGHT_TURNLIGHTON) ? CRGB::Orange : CRGB::Black; //Make last LED orange
         BRAKELIGHT_TURNLIGHTON = !BRAKELIGHT_TURNLIGHTON;
         break;
       case BRAKELIGHT_TURNLEFT:
-        writeBrakeLEDSSolid(CRGB::Black); //Start by making all brake leds blank (internal state)
-        leds[NUM_LEDS_BOARD] = (BRAKELIGHT_TURNLIGHTON) ? CRGB::Orange : CRGB::Black; //Make first LED orange
+        for (int i=0; i<NUM_LEDS_BRAKE; i++) {
+          leds[NUM_LEDS_GENERAL+i] = CRGB::Black;
+        }
+        leds[NUM_LEDS_GENERAL] = (BRAKELIGHT_TURNLIGHTON) ? CRGB::Orange : CRGB::Black; //Make first LED orange
         BRAKELIGHT_TURNLIGHTON = !BRAKELIGHT_TURNLIGHTON;
         break;
     }
@@ -496,8 +479,10 @@ void loop() {
       DEBUG_PRINT(F("VESC initialComm: err"));
       delay(500);
     }
-    
-    writeBoardLEDSSolid(VESCOK?CRGB::Green:CRGB::Red); //woah bois thats one hell of a oneliner
+
+    for (int i=0; i<NUM_LEDS_GENERAL; i++) {
+      leds[i] = VESCOK?CRGB::Green:CRGB::Red; //set led to be green or red to indicate success vesc
+    } //woah bois thats one hell of a oneliner
     FastLED.show();
     delay(500);
   }*/
@@ -651,21 +636,17 @@ void updateBrakelightTurnState() {
     BRAKELIGHT_ROLL_OFFSET = sensor_values_realtime.roll;
   }
   if (brakeLightState != BRAKELIGHT_BRAKING) { //Ensure that we're not actually braking
-    if (!turnLightsEnabled) { //Check if turn lights are enabled, if they aren't then set state accordingly
-      brakeLightState = BRAKELIGHT_NOTBRAKING;
-    } else {
-      float adjRoll = sensor_values_realtime.roll-BRAKELIGHT_ROLL_OFFSET;
-      if (debug) {
-        Serial.println("BLS Roll adjusted:");
-        Serial.println(String(adjRoll).substring(0,6));
-      }
-      if (adjRoll > BRAKELIGHT_TURNING_THRESHOLD) { //Pos roll -> clockwise turn -> turn right
-        brakeLightState = BRAKELIGHT_TURNRIGHT;
-      } else if (adjRoll < -BRAKELIGHT_TURNING_THRESHOLD) {
-        brakeLightState = BRAKELIGHT_TURNLEFT;
-      } else {
-        brakeLightState = BRAKELIGHT_NOTBRAKING;
+    float adjRoll = sensor_values_realtime.roll-BRAKELIGHT_ROLL_OFFSET;
+    if (debug) {
+      Serial.println("BLS Roll adjusted:");
+      Serial.println(String(adjRoll).substring(0,6));
     }
+    if (adjRoll > BRAKELIGHT_TURNING_THRESHOLD) {
+      brakeLightState = BRAKELIGHT_TURNRIGHT;
+    } else if (adjRoll < -BRAKELIGHT_TURNING_THRESHOLD) {
+      brakeLightState = BRAKELIGHT_TURNLEFT;
+    } else {
+      brakeLightState = BRAKELIGHT_NOTBRAKING;
     }
   }
 }
@@ -732,7 +713,7 @@ void updateESC() {
     brakeLightState = (targetPPM < ESC_STOP) ? BRAKELIGHT_BRAKING : (brakeLightState != BRAKELIGHT_TURNLEFT && brakeLightState != BRAKELIGHT_TURNRIGHT) ? BRAKELIGHT_NOTBRAKING : brakeLightState; //set brake light state based on whether we're below ESC_STOP threshold
 
     if (realPPM < targetPPM) {
-      realPPM += (targetPPM < ESC_STOP) ? PPM_ACCEL_RATE_BELOW_ZERO : PPM_ACCEL_RATE_NONBOOST; //essentially, stop slowing down at boost rate (if less than stop pos). Otherwise defer to less than 0 rate to get us back to 0 faster for snappy control
+      realPPM += (targetPPM < ESC_STOP) ? PPM_ACCEL_RATE_BOOST : (boostEnabled) ? PPM_ACCEL_RATE_BOOST : PPM_ACCEL_RATE_NONBOOST; //essentially, stop slowing down at boost rate (if less than stop pos). Otherwise defer to boost rate
     } else {
       realPPM -= PPM_BRAKE_RATE;
     }
@@ -747,20 +728,6 @@ void updateESC() {
   }
 
   ESC.write(realPPM);
-}
-
-//Doesn't call FastLED.show, so will only update internal state not actually write to leds
-void writeBrakeLEDSSolid(CRGB color) {
-  for (int i=0; i<NUM_LEDS_BRAKE; i++) {
-    leds[NUM_LEDS_BOARD+i] = color;
-  }
-}
-
-//Doesn't call FastLED.show, so will only update internal state not actually write to leds
-void writeBoardLEDSSolid(CRGB color) {
-  for (int i=0; i<NUM_LEDS_BOARD; i++) {
-    leds[i] = color;
-  }
 }
 
 void radioRecieveMode() {
