@@ -25,7 +25,7 @@
 
 //Debug stuff (incompatible with vesc)
 
-#define DEBUG
+//#define DEBUG
 
 
 #ifdef DEBUG
@@ -280,13 +280,13 @@ void setup() {
   //GIVE rider a visual indication as to whether board is functioning ok. First blink: are sensors initialized? Second blink: is VESC ok?
   writeBrakeLEDSSolid((SENSOK)?CRGB::Green:CRGB::Red); //This is a fun one-liner to write, if sensOK then write CRGB green otherwise red
   FastLED.show();
-  delay(100);
+  delay(250);
   writeBrakeLEDSSolid(CRGB::Black);
   FastLED.show();
-  delay(100);
+  delay(250);
   writeBrakeLEDSSolid((VESCOK)?CRGB::Green:CRGB::Red);
   FastLED.show();
-  delay(100);
+  delay(250);
 
   //Goto state 0; waiting for connection
   transitionState(0);
@@ -344,9 +344,10 @@ void loop() {
             turnLightsEnabled = dataRx[1];
 
             //Small bit of logic to reupdate offset value on rising edge
-            if (turnLightsEnabled) {
+            if (turnLightsEnabled != oldTurnLightsEnabled && turnLightsEnabled) {
               BRAKELIGHT_ROLL_OFFSET = sensor_values_realtime.roll;
             }
+            oldTurnLightsEnabled = turnLightsEnabled;
             break;
           case LEDMODE: //2 is led mode update
             if (dataRx[1] <= 3) { //sanity check for max LED state
@@ -420,16 +421,20 @@ void loop() {
           //Fill internal LED array w/rainbow
           fill_rainbow(leds, NUM_LEDS_BOARD, millis()/10, 7);
           
-          mappedVal = map(realPPM, ESC_MIN, ESC_MAX, 128, 0); //Fade from 128 to 0 based on dthrott
-          CRGB tintAmnt = CRGB(mappedVal, mappedVal, mappedVal);
-          for (int i=0; i<NUM_LEDS_BOARD; i++) {
-            leds[i] += tintAmnt;
+          if (realPPM > ESC_STOP) { //Put a tint on if we're not braking
+            mappedVal = map(realPPM, ESC_STOP, ESC_MAX, 0, 150); //Fade lights by 0 to 150 out of 255 in all RGB channels (towards white) based on dthrott
+            CRGB tintAmnt = CRGB(mappedVal, mappedVal, mappedVal);
+            for (int i=0; i<NUM_LEDS_BOARD; i++) {
+              leds[i] += tintAmnt;
+            }
           }
           break;
         case LEDSTATE_CHGTHROTT: //color changes based on throttle (chaser again)
           LEDdelay = LEDdelayShort;
           mappedVal = map(realPPM, ESC_MIN, ESC_MAX, 255, 0);
-          writeBoardLEDSSolid(CRGB(mappedVal, 255-mappedVal, 0));
+          for (int i=0; i<NUM_LEDS_BOARD; i++) {
+            leds[i] = CRGB(mappedVal, 255-mappedVal, 0); //Modify Red and Green channel to be inverses to go between red and green as you accel (and yellow in the middle)
+          }
           break;
       }
     }
