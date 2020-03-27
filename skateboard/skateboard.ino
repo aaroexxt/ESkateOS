@@ -72,10 +72,10 @@ float VBATT_MAX;
 float VBATT_MIN;
 unsigned long prevVUpdateMillis = 0;
 #define VUpdateMillis 1000 //time between vesc updates
-
+*/
 #define initialVESCCheckDelay 5000
 boolean initialVESCCheck = false;
-
+/*
 //Vesc data
 struct VREALTIME {
   float speed;
@@ -275,18 +275,6 @@ void setup() {
   //calculateRatios(); //Calculate VESC distance/speed ratios
 
   //DEBUG_PRINT(F("Initial VESC Setup: ok")); //TODO add check if it's null or 0 so it can fail properly
-
-  //Now that everything's setup...
-  //GIVE rider a visual indication as to whether board is functioning ok. First blink: are sensors initialized? Second blink: is VESC ok?
-  writeBrakeLEDSSolid((SENSOK)?CRGB::Green:CRGB::Red); //This is a fun one-liner to write, if sensOK then write CRGB green otherwise red
-  FastLED.show();
-  delay(250);
-  writeBrakeLEDSSolid(CRGB::Black);
-  FastLED.show();
-  delay(250);
-  writeBrakeLEDSSolid((VESCOK)?CRGB::Green:CRGB::Red);
-  FastLED.show();
-  delay(250);
 
   //Goto state 0; waiting for connection
   transitionState(0);
@@ -490,9 +478,9 @@ void loop() {
     }
   }
 
-  /*if (currentMillis>initialVESCCheckDelay && !initialVESCCheck) { //VESC status check
+  if (currentMillis>initialVESCCheckDelay && !initialVESCCheck) { //VESC status check
     initialVESCCheck = true;
-    if (VUART.getVescValues()) {
+    /*if (VUART.getVescValues()) {
       VESCOK = true;
       DEBUG_PRINT(F("VESC intialComm: ok"));
       delay(500);
@@ -500,12 +488,20 @@ void loop() {
       VESCOK = false;
       DEBUG_PRINT(F("VESC initialComm: err"));
       delay(500);
-    }
+    }*/
     
-    writeBoardLEDSSolid(VESCOK?CRGB::Green:CRGB::Red); //woah bois thats one hell of a oneliner
+    //Now that everything's setup...
+    //GIVE rider a visual indication as to whether board is functioning ok. First blink: are sensors initialized? Second blink: is VESC ok?
+    writeBrakeLEDSSolid((SENSOK)?CRGB::Green:CRGB::Red); //This is a fun one-liner to write, if sensOK then write CRGB green otherwise red
     FastLED.show();
-    delay(500);
-  }*/
+    delay(250);
+    writeBrakeLEDSSolid(CRGB::Black);
+    FastLED.show();
+    delay(250);
+    writeBrakeLEDSSolid((VESCOK)?CRGB::Green:CRGB::Red);
+    FastLED.show();
+    delay(250);
+  }
 
   updateESC(); //Update ESC with throttle value
 
