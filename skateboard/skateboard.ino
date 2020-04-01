@@ -66,7 +66,7 @@ boolean boostEnabled = false;
 
 boolean turnLightsEnabled = false;
 boolean oldTurnLightsEnabled = false; //Keep track of prev state of turnLightsEnabled so that we can catch rising/falling events
-#define TURNLIGHTS_TOGGLE_CLICK_COUNT 2
+#define TURNLIGHTS_TOGGLE_CLICK_COUNT 4
 
 /*VescUart VUART;
 float VRATIO_RPM_SPEED;
@@ -715,6 +715,10 @@ void transitionState(int newState) {
   DEBUG_PRINT(F("New state: "));
   DEBUG_PRINT(newState);
   switch (newState) {
+    case 0:
+      ledState = LEDSTATE_INITCHASE;
+      brakeLightState = BRAKELIGHT_INIT;
+      break;
     case 1:
       if (ledState == LEDSTATE_OFF) { //enable/disable the leds based on what's going on
         FastLED.clear();
