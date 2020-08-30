@@ -15,7 +15,6 @@
 #include <RF24.h>
 
 #include <SPI.h>
-#include <Wire.h>
 #include <U8g2lib.h>
 #include "printf.h"
 
@@ -51,7 +50,8 @@ typedef enum {
   DISPU_CONN_WAIT = 1,
   DISPU_START = 2,
   DISPU_SENSDATA = 3,
-  CLEAR = 4
+  CLEAR = 4,
+  DISPU_VERSION = 5
 } DISPLAY_UPDATE_TYPES;
 
 String displayString;
@@ -89,7 +89,7 @@ const unsigned char signal_noconnection_bits[] = {
 //Throttle pins/setup
 #define HALLEFFECT A1
 #define THROTT_ENABLE_SW 6
-#define throttleDeadzone 4
+#define throttleDeadzone 4 //About 1.5% intrinsic deadzone, can be bigger on skateboard but want to minimize deadzone from controller side because it's harder to modify
 #define THROTTLE_MIN 0
 #define THROTTLE_MAX 255
 #define THROTTLE_STOP (THROTTLE_MIN+THROTTLE_MAX)/2
@@ -154,6 +154,7 @@ ID 1: ThrottleVal update. Data: [raw value, 0]
 ID 2: ThrottleSW update. Data: [sw, 0]
 ID 3: LED mode update. Data: [ledMode (0, 1, 2), 0]
 ID 4: BOOST switch update. Data: [boostMode (0, 1), 0]
+ID 5: CLICK event. Data: [clickCount (0, 1, ...)]
 
 ID 10: Ask controller to send state of all peripherals
 ID 11: Controller force screen update
@@ -205,11 +206,6 @@ void setup() {
   pinMode(LED_2_SW, INPUT_PULLUP);
   Serial.println(F("Pin conf: ok"));
 
-  //Setup Wire lib
-  // Wire.begin();
-  // Wire.setClock(400000L);
-
-  // u8g2.setI2CAddress(0x3C);
   u8g2.begin(); //Initialize display
   
   Serial.println(F("OLED display: ok"));
@@ -232,12 +228,14 @@ void setup() {
 
   updateDisplay(DISPU_START);
   Serial.println(F("Start screen going up"));
-  delay(1500); //keep splash screen up for a bit
   asynchTone(3830, 100); //play a c note
   delay(100);
   asynchTone(3400, 100); //play a d note
   delay(100);
   asynchTone(3038, 100); //play a e note
+  delay(1300); //keep splash screen up for a bit
+  updateDisplay(DISPU_VERSION);
+  delay(1000);
   transitionState(0); //make sure to call transitionState to update screen
 }
 
@@ -593,6 +591,10 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) { //A lot of help for this: https://g
           u8g2.drawXBM(4, 4, 24, 24, logo_bits);
           u8g2.drawStr(34, 22, "EskateOS V2");
           u8g2.drawStr(5, 50, "By Aaron Becker");
+        break;
+      case DISPU_VERSION:
+        u8g2.setFont(u8g2_font_logisoso22_tn);
+        u8g2.drawStr(5, 50, "V5.3.3");
         break;
       case DISPU_SENSDATA:
         x = 0;
