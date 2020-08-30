@@ -3,8 +3,8 @@
 #include <RF24.h>          //nRF2401 libarary found at https://github.com/tmrh20/RF24/
 #include "printf.h"
 
-const int pinCE = 7;
-const int pinCSN = 8;
+const int pinCE = 0;
+const int pinCSN = 1;
 
 RF24 wirelessSPI(pinCE, pinCSN);
  
