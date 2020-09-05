@@ -2,7 +2,7 @@
 #include "printf.h"
     #include <nRF24L01.h>
     #include <RF24.h>
-    RF24 radio(0, 1); // CE, CSN
+    RF24 radio(7,8); // CE, CSN
     const byte addresses [][6] = {"00001", "00002"}; //write at addr 00002, read at addr 00001
     void setup() {
     Serial.begin(9600);

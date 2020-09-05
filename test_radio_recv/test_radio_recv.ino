@@ -11,17 +11,17 @@
     radio.begin();
     radio.openWritingPipe(addresses[1]);
   radio.openReadingPipe(1, addresses[0]); //set address to recieve data   //Setting the address at which we will receive the data
-    radio.setPALevel(RF24_PA_LOW);       //You can set this as minimum or maximum depending on the distance between the transmitter and receiver.
+    radio.setPALevel(RF24_PA_MAX);       //You can set this as minimum or maximum depending on the distance between the transmitter and receiver.
     radio.startListening();              //This sets the module as receiver
     radio.printDetails();
     Serial.println("RadioTest starting");
     }
     void loop()
     {
-      //digitalWrite(5, LOW);
+      digitalWrite(5, LOW);
     if (radio.available())              //Looking for the data.
     {
-    //digitalWrite(5, HIGH);
+    digitalWrite(5, HIGH);
     int dataRx[3];                 //Saving the incoming data
     radio.read(&dataRx, sizeof(dataRx));    //Reading the data
     Serial.print("Data0: ");
