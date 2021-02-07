@@ -14,6 +14,7 @@
 /**
  * Error code key
  * 100: Vesc setup error
+ * 200: Radio setup error
 */
 #include <Wire.h>
 #include <imumaths.h>
@@ -176,6 +177,8 @@ boolean SENSOK = true;   // Not used    // Needs to be true because it's immedia
 boolean error = false;
 
 void setup() {
+    // TODO: Check if hardware getting voltage
+
     // Don't move on until serial
     while (!Serial) {
         ;
@@ -205,6 +208,8 @@ void setup() {
         printf_begin();
         radio.printDetails();
     }
+
+    if (radio.getPALevel() != RF24_PA_MAX) ledErrorCode(true, 2, 0, 0);
 
     // Setup IRQ
     // Create interrupt: 0 for pin 2 or 1 for pin 3, the name of the interrupt function or ISR, and condition to trigger interrupt
@@ -244,6 +249,7 @@ void setup() {
     // Go to state 0; waiting for connection
     transitionState(0);
 }
+
 void loop() {
     unsigned long currentMillis = millis();
     int mappedVal;
@@ -320,13 +326,7 @@ void loop() {
         transitionState(2);
     }
 
-    if (speakerCharging) {
-        digitalWrite(FETTWO_PIN, HIGH);
-    } else {
-        digitalWrite(FETTWO_PIN, LOW);
-    }
-
-    // Calculate speed
+    // Part of calculate speed rewrite
     // if (currentMillis - prevVUpdateMillis >= VUpdateMillis && MASTER_STATE == 1 && VESCOK) {  // Time for VESC update
     //     prevVUpdateMillis = currentMillis;
     //     updateVESCData();
@@ -338,7 +338,7 @@ void loop() {
     radioRecieveMode();  // Set radio back to recieve mode at end of loop
 }
 
-// TODO: Calc Speed
+// TODO: Rewrite calc speed
 // double calculateSpeed() {
 //     mc_configuration VCONFIG = VUART.getMotorConfiguration();  // Takes all data directly from VESC
 //     double rpm;
@@ -462,10 +462,10 @@ void resetDataTx() {
     dataTx[1] = 0;
     dataTx[2] = 0;
 }
-/**
- * TODO: Optomize later
- * SAFETY-CRITICAL CODE
-*/
+
+// TODO: Optomize later
+// SAFETY-CRITICAL CODE
+
 void updateESC() {
     unsigned long currentMillis = millis();
 
@@ -518,8 +518,6 @@ void updateESC() {
     DEBUG_PRINT(F(" real: "));
     DEBUG_PRINT(realPPM);
     DEBUG_PRINT(F("\n"));
-
-    // TODO: Possibly add delay here
 
     // Write the actual value out
     ESC.write(realPPM);
@@ -595,7 +593,6 @@ void radioInterupt() {
                 transitionState(1);
             }
             break;
-        // TODO: update switch statment with all the shit
         case 1:  // Standard operation
             switch ((int)dataRx[0]) {
                 case THROTTLE_VAL:  // 1 is throttle update
@@ -603,6 +600,15 @@ void radioInterupt() {
                     break;
                 case THROTTLE_SW:
                     throttleEnabled = dataRx[1];
+                    break;
+                case LEDMODE:                            // 2 is led mode update
+                    if (dataRx[1] <= 3) {                // Sanity check for max LED state
+                        if (dataRx[1] == 0 && !error) {  // If it's zero; clear everything and write
+                            writeBoardLEDSSolid(CRGB::Black);
+                            FastLED.show();
+                        }
+                        ledState = dataRx[1];
+                    }
                     break;
                 case TURNSIGNAL:
                     if (turnSignalStates <= 2) {
@@ -612,19 +618,12 @@ void radioInterupt() {
                     }
                     break;
                 case SPEAKER_ON_OFF:
-                    if (speakerCharging = false) {
+                    if (!speakerCharging) {
                         speakerCharging = true;
+                        digitalWrite(FETTWO_PIN, HIGH);
                     } else {
                         speakerCharging = false;
-                    }
-                    break;
-                case LEDMODE:                            // 2 is led mode update
-                    if (dataRx[1] <= 3) {                // Sanity check for max LED state
-                        if (dataRx[1] == 0 && !error) {  // If it's zero; clear everything and write
-                            writeBoardLEDSSolid(CRGB::Black);
-                            FastLED.show();
-                        }
-                        ledState = dataRx[1];
+                        digitalWrite(FETTWO_PIN, LOW);
                     }
                     break;
                 case HEARTBEAT:  // Heartbeat. if we get one, we should send one
