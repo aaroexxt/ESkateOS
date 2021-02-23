@@ -7,14 +7,15 @@
                                                                                          
 ****************
 
-  By Aaron Becker & Ilan Rosenbaum
-  V3.Ilan Eventually
+By Aaron Becker & Ilan Rosenbaum
+V3.0
 */
 
 /**
- * Error code key
+ * Error codes
  * 100: Vesc setup error
  * 200: Radio setup error
+ * 300: ADC setup error
 */
 
 #include <Wire.h>
@@ -127,8 +128,7 @@ typedef enum {
     LEDSTATE_OFF = 0,
     LEDSTATE_INITCHASE = 1,
     LEDSTATE_RAINBOW = 2,
-    LEDSTATE_CHGTHROTT = 3,
-    LEDSTATE_ERROR = 6
+    LEDSTATE_CHGTHROTT = 3
 } LEDLIGHT_STATES;
 int ledState = LEDSTATE_INITCHASE;
 
