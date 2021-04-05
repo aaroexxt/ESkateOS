@@ -1,11 +1,13 @@
 #include <SPI.h>
+#include "RF24.h"
 #include "printf.h"
     #include <nRF24L01.h>
-    #include <RF24.h>
-    RF24 radio(7,8); // CE, CSN
+    
+    
+    RF24 radio(5,6); // CE, CSN
     const byte addresses [][6] = {"00001", "00002"}; //write at addr 00002, read at addr 00001
     void setup() {
-    Serial.begin(9600);
+    Serial.begin(115200);
     printf_begin();
     radio.begin();
     radio.openWritingPipe(addresses[0]);
