@@ -152,14 +152,11 @@ typedef enum {
     THROTTLE_SW = 2,
     LEDMODE = 3,
     TURNSIGNAL = 4,
-    SPEAKER_ON_OFF = 5,
 
     // Board -> Controller
     SENDALLDATA = 10,
-    SCREENUPDATE = 11,  // Not used
-    VESCDATA = 12,      // Calc speed
-    SENSDATA = 13,      // Not used
-    TONE = 14           // Used once, why?
+    VESCDATA = 11,      // Calc speed
+    TONE = 12          
 } RADIO_COMMANDS;
 
 // Functions
@@ -215,9 +212,15 @@ void setup() {
     pinMode(FETTWO_PIN, OUTPUT);
     digitalWrite(FETTWO_PIN, LOW);
 
-    // Make sure we're displaying nothing
-    writeBoardLEDSSolid(CRGB::Black);
+    // TODO: Delete below 3 lines if works
+    writeBoardLEDSSolid(CRGB::BlueViolet); 
     FastLED.show();
+    delay(1000);
+
+    // Make sure we're displaying nothing
+    writeBoardLEDSSolid(CRGB::Black); 
+    FastLED.show();
+
     DEBUG_PRINT(F("Setup leds: ok"));
 
     // Setup VESC UART

@@ -21,92 +21,84 @@ V3.0
 // Definitions
 
 #ifdef DEBUG
-    #define DEBUG_PRINT(x) DEBUG_PRINT(x)
-    #include "printf.h"
-    const boolean debug = true;
+#define DEBUG_PRINT(x) DEBUG_PRINT(x)
+#include "printf.h"
+const boolean debug = true;
 #else
-    #define DEBUG_PRINT(x)
-    const boolean debug = false;
+#define DEBUG_PRINT(x)
+const boolean debug = false;
 #endif
 
-#define SCREEN_WIDTH 128  // OLED display width, in pixels
-#define SCREEN_HEIGHT 64  // OLED display height, in pixels
+// Digital pins
+#define TURN_SIGNAL_BUTTON 2
+#define LED_BUTTON 3
+#define AUX_PIN 4
+#define RADIO_CE 5
+#define RADIO_CSN 6
 #define BUZZER_PIN 9
+#define RADIO_ISR_PIN 10
 
-// Throttle pins/setup
-#define HALLEFFECT A1
-#define THROTT_ENABLE_SW 6
+// Analog pins
+#define VBATT_PIN A0
+#define HALLEFFECT_PIN A1
+#define THROTT_ENABLE_BUTTON A2
+
+// Throttle stuff
 #define throttleDeadzone 4  // About 1.5% intrinsic deadzone, can be bigger on skateboard but want to minimize deadzone from controller side because it's harder to modify
 #define THROTTLE_MIN 0
 #define THROTTLE_MAX 255
 #define THROTTLE_STOP (THROTTLE_MIN + THROTTLE_MAX) / 2
-
-// Hall real low 481, hall middle 633
-#define HALL_MIN 500
+#define HALL_MIN 500  // Hall real low 481, hall middle 633
 #define HALL_MAX 1100
 #define HALL_CENTER 700  // (HALL_MIN+HALL_MAX)/2
 
-#define ENClickTimeout 1000  // Max time to register clicks
+// Screen constants
+#define SCREEN_WIDTH 128  // OLED display width, in pixels
+#define SCREEN_HEIGHT 64  // OLED display height, in pixels
 
-// Battery pins
-#define VBATT_PIN A0
-
-#define RADIO_ISR_PIN 2
-
-#define displayStateOneChangeTime 4000
-
-#define BOOST_SW 3
-#define LED_1_SW 5
-#define LED_2_SW 4
-#define debounceDelay 50
-
+// Heartbeat
 #define HBInterval 125           // Send a heartbeat every 125ms, 8x per second
-#define radioResendInterval 250  // Send all radio commands every 250ms, ~4x per secodn
+#define radioResendInterval 250  // Send all radio commands every 250ms, ~4x per second
 #define HBTimeoutMax 750         // Max time between signals before board cuts the motors in ms
+
+// Misc
+#define displayStateOneChangeTime 4000
+#define debounceDelay 250
 
 // Hardware declaration
 
-RF24 radio(7, 8);
+RF24 radio(RADIO_CE, RADIO_CSN);
 U8G2_SSD1306_128X64_NONAME_2_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);  // Defining the type of display used (128x64)
 
 // Variable declarations
 
 int MASTER_STATE = 0;
-int ledMode = -1;
-int oldLedMode = -1;
+int ledMode = 0;
+int turnSignalMode = 0;
 int dispMinUpdate = 20;  // Minimum time between display updates in ms to make sure we don't update faster than what the screen can handle
 int prevThrottle = THROTTLE_STOP;
 int throttle = THROTTLE_STOP;
-int ENclicks = 0;
 
 double dataRx[3];
 double dataTx[3];
 
 boolean throttleEnabled = false;
 boolean oldThrottleEnabled = false;
-boolean boostEnabled = false;
-boolean oldBoostEnabled = false;
 boolean updateDisplayFlag = false;
-boolean toneActive = false;
-boolean displayStateOne = false;  // Boolean controls what data is displayed during normal display
-boolean displaySensorData = false;
 boolean radioListening = false;
 boolean connected = false;  // Check if connected
 boolean oldConnected = false;
+boolean toneActive = false;
 
-// Pins
 const bool displayVESCData = false;
-const bool displaySENSData = false;
 
 // Buzzer
 unsigned long toneExpire = 0;
 unsigned long prevDispUpdateMillis = 0;
 
 unsigned long lastLEDDebounceTime = 0;
+unsigned long lastTSDebounceTime = 0;
 unsigned long lastDispStateOneTime = 0;
-
-// Click tracking of enable switch
-unsigned long ENLastClickTime = 0;
 
 unsigned long prevHBMillis = 0;
 unsigned long prevRadioResendMillis = 0;
@@ -138,16 +130,11 @@ char displayBuffer[20];
 const byte addresses[][6] = {"00001", "00002"};  // Write at addr 00001, read at addr 00002
 
 String displayString;
-
-// Enums
-
 typedef enum {
     DISPU_FULL = 0,
     DISPU_CONN_WAIT = 1,
     DISPU_START = 2,
-    DISPU_SENSDATA = 3,
-    CLEAR = 4,
-    DISPU_VERSION = 5
+    DISPU_VERSION = 3
 } DISPLAY_UPDATE_TYPES;
 
 // Data structure:
@@ -156,24 +143,19 @@ typedef enum {
 // Third int is value 2 (so you can send up to four bytes of data if you want)
 
 typedef enum {
-  HEARTBEAT = 200,
+    HEARTBEAT = 200,
 
-  //Controller -> Board
-  THROTTLE_VAL = 1,
-  THROTTLE_SW = 2,
-  LEDMODE = 3,
-  BOOSTMODE = 4, // Needs to become TURNSIGNAL
-  CLICK = 5, // Needs to become SPEAKER_ON_OFF
+    // Controller -> Board
+    THROTTLE_VAL = 1,
+    THROTTLE_SW = 2,
+    LEDMODE = 3,
+    TURNSIGNAL = 4,
 
-  //Board -> Controller
-  SENDALLDATA = 10,
-  SCREENUPDATE = 11,
-  VESCDATA = 12,
-  SENSDATA = 13,
-  TONE = 14
+    // Board -> Controller
+    SENDALLDATA = 10,
+    VESCDATA = 11,  // Calc speed
+    TONE = 12
 } RADIO_COMMANDS;
-
-// Structs
 
 // Vesc data
 struct VREALTIME {
@@ -184,30 +166,19 @@ struct VREALTIME {
 };
 struct VREALTIME vesc_values_realtime;
 
-// Gyro/accel/temp data
-struct SREALTIME {
-    float pitch;
-    float roll;
-    float heading;
-    float acceleration;
-    float temperature;
-    float altitude;
-};
-struct SREALTIME sensor_values_realtime;
-
 // Functions
 
 void setup() {
     Serial.begin(115200);
     DEBUG_PRINT(F("Eskate controller setup begin"));
 
-    pinMode(HALLEFFECT, INPUT_PULLUP);
-    pinMode(THROTT_ENABLE_SW, INPUT_PULLUP);
+    pinMode(HALLEFFECT_PIN, INPUT);
+    pinMode(THROTT_ENABLE_BUTTON, INPUT);
     pinMode(VBATT_PIN, INPUT);
+    pinMode(TURN_SIGNAL_BUTTON, INPUT);
+    pinMode(LED_BUTTON, INPUT);
+    pinMode(AUX_PIN, INPUT);
     pinMode(BUZZER_PIN, OUTPUT);
-    pinMode(BOOST_SW, INPUT_PULLUP);
-    pinMode(LED_1_SW, INPUT_PULLUP);
-    pinMode(LED_2_SW, INPUT_PULLUP);
 
     DEBUG_PRINT(F("Pin config: ok"));
 
@@ -216,14 +187,10 @@ void setup() {
     DEBUG_PRINT(F("OLED display: ok"));
 
     // Setup radio
-    if (!radio.begin()) {
-        DEBUG_PRINT(F("Radio: failed"));
-        hang();
-    }
-
+    radio.begin();
     radio.setPALevel(RF24_PA_MAX);  // Max because we don't want to lose connection
-    radio.setRetries(3, 3);         // Delay, count
-    radio.maskIRQ(1, 1, 0);         // Mask all IRQ triggers except for receive (1 is mask, 0 is no mask)
+    radio.setRetries(3, 3);             // Delay, count
+    radio.maskIRQ(1, 1, 0);             // Mask all IRQ triggers except for receive (1 is mask, 0 is no mask)
 
     // CONTROLLER Writes to addr 1, reads from addr 2
     radio.openWritingPipe(addresses[0]);
@@ -246,7 +213,6 @@ void setup() {
     // Setup IRQ
     attachInterrupt(RADIO_ISR_PIN, radioInterupt, FALLING);
 
-    
     DEBUG_PRINT(F("Setup radio: ok"));
 
     updateDisplay(DISPU_START);
@@ -260,66 +226,35 @@ void setup() {
 }
 
 void loop() {
-    unsigned long currentMillis = millis();  // Store millis value (current value) for reference
-
     // Check/update throttle state, since that should happen no matter what because of safety
-    throttleEnabled = !digitalRead(THROTT_ENABLE_SW);  // Because of input pullup, invert inputs (since it'll be pulled to ground if high)
-    if (throttleEnabled != oldThrottleEnabled) {
-        updateDisplayFlag = true;  // Set display update flag for next timer cycle
-        DEBUG_PRINT(F("ThrottleEnChgState:"));
-        DEBUG_PRINT(throttleEnabled);
 
-        if (throttleEnabled == HIGH) {  // On rising state change
-            if (ENclicks == 0) {        // First click just set the last click time to currentMillis
-                ENLastClickTime = currentMillis;
-                ENclicks++;
-            } else if (ENclicks > 0 && currentMillis < (ENLastClickTime + ENClickTimeout)) {  // Clicked within time interval
-                ENclicks++;
-                DEBUG_PRINT(F("Clicked "));
-                DEBUG_PRINT(ENclicks);
-                DEBUG_PRINT(F(" times"));
+    switch (MASTER_STATE) {
+        case 0:  // 0 is waiting for board response because hb signals are being sent constantly
+            radioRecieveMode();
+            break;
+
+        case 1:                                                   // Normal operation
+            throttleEnabled = digitalRead(THROTT_ENABLE_BUTTON);  // Because of input pullup, invert inputs (since it'll be pulled to ground if high)
+
+            if (throttleEnabled != oldThrottleEnabled) {
+                updateDisplayFlag = true;  // Set display update flag for next timer cycle
+                DEBUG_PRINT(F("ThrottleEnChgState:"));
+                DEBUG_PRINT(throttleEnabled);
 
                 // Now send the data since there's been an update
                 radioTransmitMode();
                 resetDataTx();
-                dataTx[0] = CLICK;  // Click event
-                dataTx[1] = ENclicks;
+                dataTx[0] = THROTTLE_SW;  // Sw update
+                dataTx[1] = (throttleEnabled) ? 1 : 0;
                 radio.write(&dataTx, sizeof(dataTx));
 
-                if (ENclicks == 3) {          // Clicked 3 times
-                    if (MASTER_STATE == 0) {  // If we're in state 0, triple click should transition to normal display (for testing reasons for example)
-                        transitionState(1);
-                    } else {
-                        updateDisplayFlag = true;
-                        displaySensorData = !displaySensorData;  // Toggle display sensor data state
-                    }
-                }
-            }
-        }
-
-        // Now send the data since there's been an update
-        radioTransmitMode();
-        resetDataTx();
-        dataTx[0] = THROTTLE_SW;  // Sw update
-        dataTx[1] = (throttleEnabled) ? 1 : 0;
-        radio.write(&dataTx, sizeof(dataTx));
-
-        oldThrottleEnabled = throttleEnabled;
-
-        switch (MASTER_STATE) {
-            case 0:  // 0 is waiting for board response because hb signals are being sent constantly
-                radioRecieveMode();
-                break;
-
-            case 1:  // Normal operation
+                oldThrottleEnabled = throttleEnabled;
                 // Update hall effect sensor
                 int measurement = 0;
                 for (int i = 0; i < 10; i++) {  // Take average reading over 10 samples to reduce noise
-                    measurement += analogRead(HALLEFFECT);
+                    measurement += analogRead(HALLEFFECT_PIN);
                 }
                 measurement /= 10;
-
-                // DEBUG_PRINT(measurement);
 
                 if (measurement >= HALL_CENTER) {                                                            // If true, we're going forward = >127 value
                     int forwardVal = map(measurement, HALL_CENTER, HALL_MAX, THROTTLE_STOP, THROTTLE_MAX);   // Map from middle to max (127-255)
@@ -350,93 +285,84 @@ void loop() {
                     prevThrottle = throttle;
                 }
 
-                boostEnabled = !digitalRead(BOOST_SW);  // Because of input pullup, invert inputs (since it'll be pulled to ground if high)
-                if (boostEnabled != oldBoostEnabled) {
+                // LEDs
+                int LEDReading = !digitalRead(LED_BUTTON);  // Input pullup invert inputs (since it'll be pulled to ground if high)
+                if (LEDReading && (millis() - lastLEDDebounceTime) > debounceDelay) {
+                    lastLEDDebounceTime = millis();
+                    ledMode++;
+                    // There are 4 LED states 0-3 if ledMode goes above 3 it should loop back to 0
+                    ledMode = (ledMode = 4) ? 0 : ledMode;
+
+                    // Update display
                     updateDisplayFlag = true;  // Set display update flag for next timer cycle
-                    DEBUG_PRINT(F("BoostChgState:"));
-                    DEBUG_PRINT(boostEnabled);
+                    DEBUG_PRINT(F("LEDChgState:"));
+                    DEBUG_PRINT(ledMode);
 
                     // Now send the data since there's been an update
                     radioTransmitMode();
                     resetDataTx();
-                    dataTx[0] = BOOSTMODE;  // Boost update
-                    dataTx[1] = (boostEnabled) ? 1 : 0;
+                    dataTx[0] = LEDMODE;  //led update
+                    dataTx[1] = ledMode;
                     radio.write(&dataTx, sizeof(dataTx));
-
-                    oldBoostEnabled = boostEnabled;
                 }
 
-                int LEDReading1 = !digitalRead(LED_1_SW);  //because of input pullup, invert inputs (since it'll be pulled to ground if high)
-                int LEDReading2 = !digitalRead(LED_2_SW);
-                if ((ledMode == 2 && LEDReading2 && !LEDReading1) || (ledMode == 3 && LEDReading1 && !LEDReading2) || (ledMode == 0 && !LEDReading2 && !LEDReading1)) {
-                    lastLEDDebounceTime = currentMillis;
+                // Turn Signals
+                int turnSignalReading = digitalRead(TURN_SIGNAL_BUTTON);  // Input pullup invert inputs (since it'll be pulled to ground if high)
+                if (turnSignalReading && (millis() - lastTSDebounceTime) > debounceDelay) {
+                    lastTSDebounceTime = millis();
+                    turnSignalMode++;
+
+                    // There are 4 LED states 0-3 if ledMode goes above 3 it should loop back to 0
+                    turnSignalMode = (turnSignalMode = 3) ? 0 : turnSignalMode;
+
+                    // Update display
+                    updateDisplayFlag = true;  // Set display update flag for next timer cycle
+                    DEBUG_PRINT(F("LEDChgState to turn signal:"));
+                    DEBUG_PRINT(turnSignalMode);
+
+                    // Now send the data since there's been an update
+                    radioTransmitMode();
+                    resetDataTx();
+                    dataTx[0] = TURNSIGNAL;  //led update
+                    dataTx[1] = turnSignalMode;
+                    radio.write(&dataTx, sizeof(dataTx));
                 }
-                if ((currentMillis - lastLEDDebounceTime) > debounceDelay) {  //it's been there longer than the 50ms, so just write it
-                    ledMode = (LEDReading1) ? 2 : (LEDReading2) ? 3
-                                                                : 0;  //switch states
-
-                    if (oldLedMode != ledMode) {
-                        //Update display
-                        updateDisplayFlag = true;  //set display update flag for next timer cycle
-                        DEBUG_PRINT(F("LEDChgState:"));
-                        DEBUG_PRINT(ledMode);
-
-                        //Now send the data since there's been an update
-                        radioTransmitMode();
-                        resetDataTx();
-                        dataTx[0] = LEDMODE;  //led update
-                        dataTx[1] = ledMode;
-                        radio.write(&dataTx, sizeof(dataTx));
-
-                        oldLedMode = ledMode;
-                    }
-                }
-                break;
-        }
+            }
+            
+            if (millis() - prevRadioResendMillis >= radioResendInterval) {  // Check if we should send all radio commands
+                sendAllRadioCommands();                                     // Don't need to send second HB signal because it was already send in sendAllRadioCommands
+                prevHBMillis = millis();
+                prevRadioResendMillis = millis();
+            }
+            break;
     }
 
-    if (currentMillis >= (ENLastClickTime + ENClickTimeout) && ENLastClickTime != 0) {  // Reset click count; time interval expired
-        ENclicks = 0;
-        ENLastClickTime = 0;
-    }
-
-    if (currentMillis - prevRadioResendMillis >= radioResendInterval) {  // Check if we should send all radio commands
-        sendAllRadioCommands();                                          // Don't need to send second HB signal because it was already send in sendAllRadioCommands
-        prevHBMillis = currentMillis;
-        prevRadioResendMillis = currentMillis;
-    } else if (currentMillis - prevHBMillis >= HBInterval) {  // Every HBInterval ms send a new heartbeat to board (if it isn't already sent
+    if (millis() - prevHBMillis >= HBInterval) {  // Every HBInterval ms send a new heartbeat to board (if it isn't already sent
         radioTransmitMode();
         resetDataTx();
         dataTx[0] = HEARTBEAT;
         radio.write(&dataTx, sizeof(dataTx));
-        prevHBMillis = currentMillis;
+        prevHBMillis = millis();
+    }
+
+    if (toneActive && millis() > toneExpire) {
+        noTone(BUZZER_PIN);
+        toneActive = false;
     }
 
     // Check if controller is still connected (hearbeat signal present within time?)
-    connected = (currentMillis - lastHBTime >= HBTimeoutMax) ? false : true;
+    connected = (millis() - lastHBTime >= HBTimeoutMax) ? false : true;
     if (oldConnected != connected) {  // Only update on change
         updateDisplayFlag = true;
     }
     oldConnected = connected;
 
     // Perform display update if enough time has elapsed
-    if (currentMillis - prevDispUpdateMillis >= dispMinUpdate && (updateDisplayFlag || currentMillis - lastDispStateOneTime > displayStateOneChangeTime) && MASTER_STATE != 0) {
+    if (millis() - prevDispUpdateMillis >= dispMinUpdate && (updateDisplayFlag || millis() - lastDispStateOneTime > displayStateOneChangeTime) && MASTER_STATE != 0) {
         updateDisplayFlag = false;
-        prevDispUpdateMillis = currentMillis;
-
-        if (displaySensorData) {  // Update with proper display mode
-            updateDisplay(DISPU_SENSDATA);
-        } else {
-            updateDisplay(DISPU_FULL);
-        }
+        prevDispUpdateMillis = millis();
+        updateDisplay(DISPU_FULL);
     }
-
-    // End tone if it's expired
-    if (currentMillis > toneExpire && toneActive) {
-        noTone(BUZZER_PIN);
-        toneActive = false;
-    }
-
     radioRecieveMode();  // Default to recieve mode so as to not drop transmissions
 }
 
@@ -444,28 +370,20 @@ void radioInterupt() {
     resetDataRx();
     radio.read(&dataRx, sizeof(dataRx));
 
-    if (MASTER_STATE = 0) {
-        if (radio.available()) {
-            if (dataRx[0] == 200) {  // 200 is "heartbeat" signal
-                DEBUG_PRINT(F("Got first heartbeat signal from board"));
-                connected = true;  // Set connected flag
-                transitionState(1);
-            }
-        }
+    if (MASTER_STATE = 0 && radio.available() && dataRx[0] == 200) {
+        DEBUG_PRINT(F("Got first heartbeat signal from board"));
+        connected = true;  // Set connected flag
+        transitionState(1);
     }
 
     boolean vvNew = false;  // Keep track of new data from vesc; did it actually arrive
-    boolean ssNew = false;  // Keep track of new data from sensor; did it actually arrive
 
     switch ((int)dataRx[0]) {
         case HEARTBEAT:  // Board -> remote heartbeats
-            lastHBTime = currentMillis;
+            lastHBTime = millis();
             break;
         case SENDALLDATA:
             sendAllRadioCommands();
-            break;
-        case SCREENUPDATE:
-            updateDisplayFlag = true;  // Set flag so as not to refresh too fast
             break;
         case VESCDATA:  // ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is batt percent
             switch ((int)dataRx[1]) {
@@ -487,34 +405,6 @@ void radioInterupt() {
                     break;
             }
             break;
-        case SENSDATA:  // ID 13: Sensor data [id, value]. ID 0 is pitch, ID 1 is roll, ID 2 is heading, ID 3 is acceleration, ID 4 is temperature, ID 5 is altitude
-            switch ((int)dataRx[1]) {
-                case 0:
-                    sensor_values_realtime.pitch = dataRx[2];
-                    ssNew = true;
-                    break;
-                case 1:
-                    sensor_values_realtime.roll = dataRx[2];
-                    ssNew = true;
-                    break;
-                case 2:
-                    sensor_values_realtime.heading = dataRx[2];
-                    ssNew = true;
-                    break;
-                case 3:
-                    sensor_values_realtime.acceleration = dataRx[2];
-                    ssNew = true;
-                    break;
-                case 4:
-                    sensor_values_realtime.temperature = dataRx[2];
-                    ssNew = true;
-                    break;
-                case 5:
-                    sensor_values_realtime.altitude = dataRx[2];
-                    ssNew = true;
-                    break;
-            }
-            break;
         case TONE:
             asynchTone(dataRx[1], dataRx[2]);  // Tone, time
             break;
@@ -529,17 +419,6 @@ void radioInterupt() {
         DEBUG_PRINT(F("Batt percent: "));
         DEBUG_PRINT(String(vesc_values_realtime.battPercent));
     }
-    if (ssNew && displaySENSData) {
-        DEBUG_PRINT(F("New sensor data recieved\n(Pitch, roll, heading): "));
-        DEBUG_PRINT(String(sensor_values_realtime.pitch) + "," + String(sensor_values_realtime.roll) + "," + String(sensor_values_realtime.heading));
-        DEBUG_PRINT(F("Acceleration: "));
-        DEBUG_PRINT(String(sensor_values_realtime.acceleration));
-        DEBUG_PRINT(F("Temperature: "));
-        DEBUG_PRINT(String(sensor_values_realtime.temperature));
-        DEBUG_PRINT(F("Altitude: "));
-        DEBUG_PRINT(String(sensor_values_realtime.altitude));
-    }
-    break;
 }
 
 void transitionState(int newState) {
@@ -569,23 +448,19 @@ void sendAllRadioCommands() {  // Sends all commands to board
     radio.write(&dataTx, sizeof(dataTx));
     resetDataTx();
 
-    dataTx[0] = BOOSTMODE;  // Boost update
-    dataTx[1] = (boostEnabled) ? 1 : 0;
+    resetDataTx();
+    dataTx[0] = TURNSIGNAL;  // Turn signal update
+    dataTx[1] = turnSignalMode;
     radio.write(&dataTx, sizeof(dataTx));
 
     resetDataTx();
-    dataTx[0] = THROTTLE_SW;  // Sw update
+    dataTx[0] = THROTTLE_SW;  // Throttle switch update
     dataTx[1] = (throttleEnabled) ? 1 : 0;
     radio.write(&dataTx, sizeof(dataTx));
 
     resetDataTx();
     dataTx[0] = THROTTLE_VAL;  // Throttle update
     dataTx[1] = prevThrottle;
-    radio.write(&dataTx, sizeof(dataTx));
-
-    resetDataTx();
-    dataTx[0] = CLICK;  // Click event
-    dataTx[1] = ENclicks;
     radio.write(&dataTx, sizeof(dataTx));
 }
 
@@ -619,51 +494,13 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 break;
             case DISPU_VERSION:
                 u8g2.setFont(u8g2_font_logisoso22_tn);
-                u8g2.drawStr(5, 50, "V5.3.3");
-                break;
-            case DISPU_SENSDATA:
-                x = 0;
-                y = 0;
-
-                u8g2.setFont(u8g2_font_helvR10_tr);
-                u8g2.drawStr(x + 50, y + 12, "Sensor Data");
-                u8g2.setFont(u8g2_font_profont12_tr);
-
-                y += 12;  // Pitch
-                displayString = "P:";
-                displayString += String(sensor_values_realtime.pitch);
-                displayString.toCharArray(displayBuffer, 8);
-                u8g2.drawStr(x, y, displayBuffer);
-
-                y += 12;  // Roll
-                displayString = "R:";
-                displayString += String(sensor_values_realtime.roll);
-                displayString.toCharArray(displayBuffer, 8);
-                u8g2.drawStr(x, y, displayBuffer);
-
-                y += 12;  // Heading
-                displayString = "H:";
-                displayString += String(sensor_values_realtime.heading);
-                displayString.toCharArray(displayBuffer, 8);
-                u8g2.drawStr(x, y, displayBuffer);
-
-                y += 12;  // Temperature
-                displayString = "T:";
-                displayString += String(sensor_values_realtime.temperature);
-                displayString.toCharArray(displayBuffer, 8);
-                u8g2.drawStr(x, y, displayBuffer);
-
-                y += 12;  // Altitude
-                displayString = "A:";
-                displayString += String(sensor_values_realtime.altitude);
-                displayString.toCharArray(displayBuffer, 8);
-                u8g2.drawStr(x, y, displayBuffer);
+                u8g2.drawStr(5, 50, "V6.0");
                 break;
             case DISPU_FULL:
-                x = 0;
-                y = 0;
+                // TODO: Should display battery level % controller AND board, Speed in MPH, Signal in 5 bars, and battery voltage
+                // x and y are positions on OLED in pixels
+
                 // BATTERY LEVEL
-                // Position on OLED
                 x = 108;
                 y = 4;
 
@@ -702,18 +539,6 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                     u8g2.drawStr(x, y, "T:E");
                 } else {
                     u8g2.drawStr(x, y, "T:D");
-                }
-
-                // BOOST INDICATOR
-
-                x = 110;
-                y = 50;
-
-                u8g2.setFont(u8g2_font_profont12_tr);
-                if (boostEnabled) {
-                    u8g2.drawStr(x, y, "B:E");
-                } else {
-                    u8g2.drawStr(x, y, "B:D");
                 }
 
                 // LED MODE INDICATOR
@@ -761,11 +586,6 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 int decimals;
                 int first, last;
 
-                if (millis() - lastDispStateOneTime > displayStateOneChangeTime) {
-                    displayStateOne = !displayStateOne;
-                    lastDispStateOneTime = millis();
-                }
-
                 for (int i = 0; i < 2; i++) {
                     switch (i) {
                         case 0:  // >--- Speed
@@ -775,24 +595,12 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                             decimals = 1;
                             break;
                         case 1:  // >--- Distance
-                            if (displayStateOne) {
-                                prefix = F("DISTANCE");
-                                suffix = F("MI");
-                                value = vesc_values_realtime.distanceTravelled;
-                                decimals = 2;
-                            } else {  // >--- Batt Voltage
-                                prefix = F("BATTV");
-                                suffix = F("V");
-                                value = vesc_values_realtime.inputVoltage;
-                                decimals = 1;
-                            }
+                            prefix = F("BATTV");
+                            suffix = F("V");
+                            value = vesc_values_realtime.inputVoltage;
+                            decimals = 1;
+                            
                             break;
-                            // case 3: //>--- Mosfet Temp (VESC)
-                            //   prefix = F("FTEMP");
-                            //   suffix = F("F");
-                            //   value = vesc_values_realtime.temp;
-                            //   decimals = 2;
-                            //   break;
                     }
 
                     // Display prefix (title)
@@ -831,9 +639,6 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
 
                     y += 25;
                 }
-                break;
-            case CLEAR:
-            default:
                 break;
         }
     } while (u8g2.nextPage());
