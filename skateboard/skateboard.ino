@@ -371,15 +371,6 @@ void radioInterupt() {
                         turnSignalStates -= 2;
                     }
                     break;
-                case SPEAKER_ON_OFF:
-                    if (!speakerCharging) {
-                        speakerCharging = true;
-                        digitalWrite(FETTWO_PIN, HIGH);
-                    } else {
-                        speakerCharging = false;
-                        digitalWrite(FETTWO_PIN, LOW);
-                    }
-                    break;
                 case HEARTBEAT:
                     radioTransmitMode();
                     resetDataTx();
