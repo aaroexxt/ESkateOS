@@ -20,6 +20,7 @@ V3.0
 
 #include <Wire.h>
 #include <imumaths.h>
+
 #include "printf.h"
 
 // LED Library
@@ -38,12 +39,12 @@ V3.0
 // Definitions
 
 #ifdef DEBUG
-    #define DEBUG_PRINT(x) Serial.println(x)
-    #include "printf.h"
-    const boolean debug = true;
+#define DEBUG_PRINT(x) Serial.println(x)
+#include "printf.h"
+const boolean debug = true;
 #else
-    #define DEBUG_PRINT(x)
-    const boolean debug = false;
+#define DEBUG_PRINT(x)
+const boolean debug = false;
 #endif
 
 // ESC pin defs
@@ -115,7 +116,6 @@ int MASTER_STATE = 0;
 
 unsigned long prevLoopMillis = 0;
 
-
 // Physical Constants
 const int motorPoles = 7;
 const int motorPulley = 14;
@@ -155,8 +155,8 @@ typedef enum {
 
     // Board -> Controller
     SENDALLDATA = 10,
-    VESCDATA = 11,      // Calc speed
-    TONE = 12          
+    VESCDATA = 11,  // Calc speed
+    TONE = 12
 } RADIO_COMMANDS;
 
 // Functions
@@ -213,12 +213,12 @@ void setup() {
     digitalWrite(FETTWO_PIN, LOW);
 
     // TODO: Delete below 3 lines if works
-    writeBoardLEDSSolid(CRGB::BlueViolet); 
+    writeBoardLEDSSolid(CRGB::BlueViolet);
     FastLED.show();
     delay(1000);
 
     // Make sure we're displaying nothing
-    writeBoardLEDSSolid(CRGB::Black); 
+    writeBoardLEDSSolid(CRGB::Black);
     FastLED.show();
 
     DEBUG_PRINT(F("Setup leds: ok"));
@@ -235,7 +235,7 @@ void setup() {
         ledErrorCode(true, 1, 0, 0);
         DEBUG_PRINT(F("VESC initialComm: err"));
     }
-    
+
     // Go to state 0; waiting for connection
     transitionState(0);
 }
@@ -380,8 +380,8 @@ void radioInterupt() {
                     lastHBTime = millis();
                     break;
             }
-        case 2:                            // Lost connection case
-            if (dataRx[0] == HEARTBEAT) {  
+        case 2:  // Lost connection case
+            if (dataRx[0] == HEARTBEAT) {
                 DEBUG_PRINT(F("Got heartbeat signal from controller after disconnection"));
                 ledState = 0;
 
@@ -469,7 +469,7 @@ void updateESC() {
         realPPM += deltaPPM;
     }
     realPPM = constrain(realPPM, ESC_MIN, ESC_MAX);  // Make sure we're within limits for safety
-    prevLoopMillis = currentMillis;          
+    prevLoopMillis = currentMillis;
 
     // For Human Readability
     DEBUG_PRINT(F("Target: "));
@@ -558,13 +558,6 @@ void resetDataTx() {
     dataTx[1] = 0;
     dataTx[2] = 0;
 }
-
-
-
-
-
-
-
 
 // TODO: Rewrite calc speed
 
