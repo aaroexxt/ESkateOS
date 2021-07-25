@@ -450,7 +450,6 @@ void sendAllRadioCommands() {  // Sends all commands to board
     dataTx[0] = LEDMODE;  // Led update
     dataTx[1] = ledMode;
     radio.write(&dataTx, sizeof(dataTx));
-    resetDataTx();
 
     resetDataTx();
     dataTx[0] = TURNSIGNAL;  // Turn signal update
