@@ -216,12 +216,16 @@ void setup() {
     DEBUG_PRINT(F("Setup radio: ok"));
 
     updateDisplay(DISPU_START);
-    DEBUG_PRINT(F("Start screen going up"));
-    asynchTone(3830, 100);  // Play a c note
-    asynchTone(3400, 100);  // Play a d note
-    asynchTone(3038, 100);  // Play a e note
     updateDisplay(DISPU_VERSION);
-    delay(1000);
+    DEBUG_PRINT(F("Start screen going up"));
+    tone(BUZZER_PIN, 3830);  // Play a c note
+    delay(200);
+    tone(BUZZER_PIN, 3400);  // Play a d note
+    delay(200);
+    tone(BUZZER_PIN, 3038);  // Play a e note
+    delay(200);
+    noTone(BUZZER_PIN);
+    delay(400);
     transitionState(0);  // Make sure to call transitionState to update screen
 }
 
