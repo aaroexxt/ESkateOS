@@ -200,7 +200,7 @@ void setup() {
         radio.printDetails();
     }
 
-    if (radio.getPALevel() != RF24_PA_MAX) ledErrorCode(true, 2, 0, 0);
+    if (radio.getPALevel() != RF24_PA_MAX) displayErrorCode(true, 2, 0, 0);
 
     // Setup IRQ
     attachInterrupt(RADIO_ISR_PIN, radioInterupt, FALLING);
@@ -495,7 +495,7 @@ void updateESC() {
     delay(10);  // 10ms delay
 }
 
-void ledErrorCode(boolean hang, int e1, int e2, int e3) {
+void displayErrorCode(boolean hang, int e1, int e2, int e3) {
     error = true;
 
     if (e1 + e2 + e3 + 2 > NUM_LEDS_BOARD) {
