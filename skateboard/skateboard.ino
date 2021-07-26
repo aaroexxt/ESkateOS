@@ -238,7 +238,7 @@ void setup() {
     if (VUART.getVescValues()) {
         DEBUG_PRINT(F("VESC intialComm: ok"));
     } else {
-        ledErrorCode(true, 1, 0, 0);
+        displayErrorCode(true, 1, 0, 0);
         DEBUG_PRINT(F("VESC initialComm: err"));
     }
 
@@ -581,8 +581,9 @@ double getSpeed() {
 
 double getBattPercent() {
     if (VUART.getVescValues()) {
-        float battPercent = mapFloat(vesc_values_realtime.inputVoltage, VBATT_MIN, VBATT_MAX, 0, 100);
-        return (battPercent < VBATT_MIN) ? VBATT_MIN : (battPercent > VBATT_MAX) ? VBATT_MAX;
+        float inpVoltage = (float)VUART.data.inpVoltage;
+        float voltageRounded = ((inpVoltage < VBATT_MIN) ? VBATT_MIN : (inpVoltage > VBATT_MAX) ? VBATT_MAX : inpVoltage);
+        return mapFloat(voltageRounded, VBATT_MIN, VBATT_MAX, 0, 100);
     } else {
         DEBUG_PRINT(F("Vesc data get fail"));
         return -1.0;
