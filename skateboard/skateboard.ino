@@ -252,6 +252,7 @@ void loop() {
 
     if (currentMillis - prevVescMillis >= vescDelay && !error) {
         prevVescMillis = currentMillis;
+        sendVESCData();
     }
     if (currentMillis - prevLEDMillis >= LEDdelay && !error) {  // Make sure the leds are enabled
         prevLEDMillis = currentMillis;
