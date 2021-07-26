@@ -396,14 +396,6 @@ void radioInterupt() {
                     vvNew = true;
                     break;
                 case 1:
-                    vesc_values_realtime.distanceTravelled = dataRx[2];
-                    vvNew = true;
-                    break;
-                case 2:
-                    vesc_values_realtime.inputVoltage = dataRx[2];
-                    vvNew = true;
-                    break;
-                case 3:
                     vesc_values_realtime.battPercent = dataRx[2];
                     vvNew = true;
                     break;

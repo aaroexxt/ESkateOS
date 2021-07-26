@@ -76,7 +76,7 @@ const boolean debug = false;
 #define LED_FPS 120  // Not used
 #define LEDdelayShort 10
 #define LEDdelayLong 100
-#define LEDdelaySuperLong 500
+#define LEDdelayTurnSignal 500
 
 // Pins defs
 #define INDICATOR_PIN 13  // Not used
@@ -106,9 +106,12 @@ unsigned long prevLEDMillis = 0;
 int LEDdelay = LEDdelayLong;
 int ledPosition = 0;  // Current position in strip for pattern
 
+// VESC
+unsigned long prevVescMillis = 0;
+int vescDelay = 100;
+
 boolean error = false;
 boolean throttleEnabled = false;
-boolean speakerCharging = false;
 
 int realPPM = ESC_STOP;
 int realRAW = 0;
@@ -116,12 +119,15 @@ int MASTER_STATE = 0;
 
 unsigned long prevLoopMillis = 0;
 
-// Physical Constants
+// Physical Constants 
+// TODO: set these variables, should be imperial units (we want MPH) delete this comment when complete
 const int motorPoles = 7;
-const int motorPulley = 14;
-const int wheelPulley = 36;
+const int motorPulley = 14; // Inches
+const int wheelPulley = 36; // Inches
 const double gearRatio = (double)motorPulley / (double)wheelPulley;
-const double wheelDiameter = 3.54331;  // Inches
+const double wheelDiameter = 3.54331;  // Inches                                  
+const double VBATT_MIN = 3.2; // Voltage
+const double VBATT_MAX = 4.4; // Voltage
 
 // Enums
 typedef enum {
@@ -243,6 +249,10 @@ void setup() {
 void loop() {
     unsigned long currentMillis = millis();
     int mappedVal;
+
+    if (currentMillis - prevVescMillis >= vescDelay && !error) {
+        prevVescMillis = currentMillis;
+    }
     if (currentMillis - prevLEDMillis >= LEDdelay && !error) {  // Make sure the leds are enabled
         prevLEDMillis = currentMillis;
         if (turnSignalStates == NOTTURNING) {
@@ -284,7 +294,7 @@ void loop() {
                 }
             }
         } else {
-            LEDdelay = LEDdelaySuperLong;
+            LEDdelay = LEDdelayTurnSignal;
 
             if (turnSignalStates == LEDSTATE_TURNRIGHT) {
                 for (int i = 0; i < NUM_LEDS_BOARD / 2; i++) {
@@ -559,71 +569,41 @@ void resetDataTx() {
     dataTx[2] = 0;
 }
 
-// TODO: Rewrite calc speed
+double getSpeed() {
+    if (VUART.getVescValues()) {
+        return (((double)VUART.data.tachometerAbs / motorPoles) * wheelDiameter) / (gearRatio * 336);
+    } else {
+        DEBUG_PRINT(F("Vesc data get fail"));
+        return -1.0;
+    }
+}
 
-// double calculateSpeed() {
-//     mc_configuration VCONFIG = VUART.getMotorConfiguration();  // Takes all data directly from VESC
-//     double rpm;
+double getBattPercent() {
+    if (VUART.getVescValues()) {
+        float battPercent = mapFloat(vesc_values_realtime.inputVoltage, VBATT_MIN, VBATT_MAX, 0, 100);
+        return (battPercent < VBATT_MIN) ? VBATT_MIN : (battPercent > VBATT_MAX) ? VBATT_MAX;
+    } else {
+        DEBUG_PRINT(F("Vesc data get fail"));
+        return -1.0;
+    }
+}
 
-//     if (VUART.getVescValues()) {
-//         rpm = (double)VUART.data.tachometerAbs / motorPoles;
-//     }
+void sendVESCData() {
+    radioTransmitMode();
+    resetDataTx();
+    // ID 12: VESC data [id, value]. ID 0 is speed, ID 1 is battery percent
+    dataTx[0] = VESCDATA;
+    dataTx[1] = 0;
+    dataTx[2] = getSpeed();
+    radio.write(&dataTx, sizeof(dataTx));
 
-//     return (rpm * wheelDiameter) / (gearRatio * 336)
-// }
+    resetDataTx();
+    dataTx[0] = VESCDATA;
+    dataTx[1] = 1;
+    dataTx[2] = getBattPercent();
+    radio.write(&dataTx, sizeof(dataTx));
+}
 
-// void updateVESCData() {
-//     if (VUART.getVescValues()) {
-//         DEBUG_PRINT(F("Units in "));
-//         DEBUG_PRINT((unitsInKM ? "kilometers" : "miles"));
-//         vesc_values_realtime.distanceTravelled = (float)VUART.data.tachometerAbs * VRATIO_TACHO_KM * (unitsInKM ? VRATIO_KM_MI : 1);
-//         DEBUG_PRINT(F("Distance travelled (from tachometer): "));
-//         DEBUG_PRINT(String(vesc_values_realtime.distanceTravelled));
-
-//         vesc_values_realtime.speed = (float)VUART.data.rpm * VRATIO_RPM_SPEED * (unitsInKM ? VRATIO_KM_MI : 1);
-//         DEBUG_PRINT(F("Current speed (from rpm): "));
-//         DEBUG_PRINT(String(vesc_values_realtime.speed));
-
-//         vesc_values_realtime.inputVoltage = (float)VUART.data.inpVoltage;
-//         DEBUG_PRINT(F("Current inpVoltage: "));
-//         DEBUG_PRINT(String(vesc_values_realtime.inputVoltage));
-
-//         float battPercent = mapFloat(vesc_values_realtime.inputVoltage, VBATT_MIN, VBATT_MAX, 0, 100);
-//         vesc_values_realtime.battPercent = (battPercent < VBATT_MIN) ? VBATT_MIN : (battPercent > VBATT_MAX) ? VBATT_MAX
-//                                                                                                              : battPercent;
-//         DEBUG_PRINT(F("Current battPercent: "));
-//         DEBUG_PRINT(String(vesc_values_realtime.battPercent));
-//     } else {
-//         DEBUG_PRINT(F("Vesc data get fail"));
-//         vesc_values_realtime.distanceTravelled = -1.0;
-//         vesc_values_realtime.speed = -1.0;
-//         vesc_values_realtime.inputVoltage = -1.0;
-//         vesc_values_realtime.battPercent = -1.0;
-//     }
-// }
-
-// void sendVESCData() {
-//     radioTransmitMode();
-//     resetDataTx();
-//     // ID 12: VESC data [id, value]. ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is batt percent
-//     dataTx[0] = 12;
-//     dataTx[1] = 0;
-//     dataTx[2] = vesc_values_realtime.speed;
-//     radio.write(&dataTx, sizeof(dataTx));
-
-//     dataTx[1] = 1;
-//     dataTx[2] = vesc_values_realtime.distanceTravelled;
-//     radio.write(&dataTx, sizeof(dataTx));
-
-//     dataTx[1] = 2;
-//     dataTx[2] = vesc_values_realtime.inputVoltage;
-//     radio.write(&dataTx, sizeof(dataTx));
-
-//     dataTx[1] = 3;
-//     dataTx[2] = vesc_values_realtime.battPercent;
-//     radio.write(&dataTx, sizeof(dataTx));
-// }
-
-// float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
-//     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-// }
+float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
+    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
