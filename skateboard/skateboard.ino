@@ -19,7 +19,6 @@ V3.0
 */
 
 #include <Wire.h>
-#include <imumaths.h>
 
 #include "printf.h"
 
@@ -30,13 +29,14 @@ V3.0
 #include <RF24.h>
 
 // vesc imports
-#include <Adafruit_BNO055.h>
-#include <Adafruit_Sensor.h>
 #include <ServoTimer2.h>                       // controlling vesc speed
 #include <SparkFun_ADS1015_Arduino_Library.h>  // library adafuit for reading adc data
 #include <VescUart.h>
 
 // Definitions
+
+//Uncomment below to enable debug prints
+//#define DEBUG
 
 #ifdef DEBUG
 #define DEBUG_PRINT(x) Serial.println(x)
@@ -48,7 +48,7 @@ const boolean debug = false;
 #endif
 
 // ESC pin defs
-#define ESC_PIN 5
+#define ESC_PIN 15
 #define ESC_MIN 800
 #define ESC_MAX 2000
 #define ESC_STOP (ESC_MIN + ESC_MAX) / 2
@@ -68,10 +68,10 @@ const boolean debug = false;
 #define HBTimeoutMax 750  // Max time between signals before board cuts the motors in ms
 
 // LEDs defs
-#define LED_DATA_PIN 3
+#define LED_DATA_PIN 14
 #define LED_TYPE WS2811
 #define COLOR_ORDER BRG  // I'm using a BRG led strip which is kinda wacky
-#define NUM_LEDS_BOARD 32
+#define NUM_LEDS_BOARD 26
 #define LED_BRIGHTNESS 128
 #define LED_FPS 120  // Not used
 #define LEDdelayShort 10
@@ -90,13 +90,12 @@ const boolean debug = false;
 // General Hardware
 ServoTimer2 ESC;  // Create FSESC "servo" output
 VescUart VUART;
-Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28);
 
 // Radio
-RF24 radio(7, 8);
+RF24 radio(0, 1);
 const byte addresses[][6] = {"00001", "00002"};  // Read at addr 00001, write at addr 00002
-double dataRx[3];                                // Double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes (no dynamic payload)
-double dataTx[3];
+float dataRx[3];                                // Double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes (no dynamic payload)
+float dataTx[3];
 unsigned long lastHBTime = 0;  // Time when heartbeat signal was last recieved
 boolean radioListening = false;
 
@@ -187,7 +186,6 @@ void setup() {
     radio.begin();
     radio.setPALevel(RF24_PA_MAX);  // Max because we don't want to lose connection
     radio.setRetries(3, 3);         // Delay, count
-    radio.maskIRQ(1, 1, 0);         // Mask all IRQ triggers except for receive (1 is mask, 0 is no mask)
 
     // Skateboard writes to addr 2, reads from addr 1
     radio.openWritingPipe(addresses[1]);
@@ -202,9 +200,6 @@ void setup() {
 
     if (radio.getPALevel() != RF24_PA_MAX) displayErrorCode(true, 2, 0, 0);
 
-    // Setup IRQ
-    attachInterrupt(RADIO_ISR_PIN, radioInterupt, FALLING);
-
     DEBUG_PRINT(F("Setup radio: ok"));
 
     // Setup LEDs
@@ -218,42 +213,38 @@ void setup() {
     pinMode(FETTWO_PIN, OUTPUT);
     digitalWrite(FETTWO_PIN, LOW);
 
-    // TODO: Delete below 3 lines if works
-    writeBoardLEDSSolid(CRGB::BlueViolet);
-    FastLED.show();
-    delay(1000);
-
     // Make sure we're displaying nothing
     writeBoardLEDSSolid(CRGB::Black);
     FastLED.show();
 
     DEBUG_PRINT(F("Setup leds: ok"));
 
-    // Setup VESC UART
-    delay(initialVESCDelay);
-    DEBUG_PRINT(F("bef vesc init"));
-    VUART.setSerialPort(&Serial);
-    DEBUG_PRINT(F("aft vesc init"));
+//    // Setup VESC UART
+//    delay(initialVESCDelay);
+//    DEBUG_PRINT(F("bef vesc init"));
+//    VUART.setSerialPort(&Serial);
+//    DEBUG_PRINT(F("aft vesc init"));
 
-    if (VUART.getVescValues()) {
-        DEBUG_PRINT(F("VESC intialComm: ok"));
-    } else {
-        displayErrorCode(true, 1, 0, 0);
-        DEBUG_PRINT(F("VESC initialComm: err"));
-    }
+//    if (VUART.getVescValues()) {
+//        DEBUG_PRINT(F("VESC intialComm: ok"));
+//    } else {
+//        displayErrorCode(true, 1, 0, 0);
+//        DEBUG_PRINT(F("VESC initialComm: err"));
+//    }
 
     // Go to state 0; waiting for connection
     transitionState(0);
 }
 
 void loop() {
+    radioInterrupt();
     unsigned long currentMillis = millis();
     int mappedVal;
 
-    if (currentMillis - prevVescMillis >= vescDelay && !error) {
-        prevVescMillis = currentMillis;
-        sendVESCData();
-    }
+//    if (currentMillis - prevVescMillis >= vescDelay && !error) {
+//        prevVescMillis = currentMillis;
+//        sendVESCData();
+//    }
     if (currentMillis - prevLEDMillis >= LEDdelay && !error) {  // Make sure the leds are enabled
         prevLEDMillis = currentMillis;
         if (turnSignalStates == NOTTURNING) {
@@ -332,9 +323,13 @@ void loop() {
     radioRecieveMode();  // Set radio back to recieve mode at end of loop
 }
 
-void radioInterupt() {
+void radioInterrupt() {
+  radioRecieveMode();
+  if (radio.available()) {
+    Serial.println("RAD RECV");
     resetDataRx();
     radio.read(&dataRx, sizeof(dataRx));
+    Serial.println(dataRx[0]);
 
     switch (MASTER_STATE) {
         // Waiting for first hb signal from controller
@@ -409,6 +404,7 @@ void radioInterupt() {
             DEBUG_PRINT(F("Undefined state; resetting"));
             transitionState(0);
     }
+  }
 }
 
 void transitionState(int newState) {

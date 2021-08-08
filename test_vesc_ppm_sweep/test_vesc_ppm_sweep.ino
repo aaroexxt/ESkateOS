@@ -3,7 +3,7 @@
 #include <ServoTimer2.h>
 
 ServoTimer2 ESC_RIGHT; //Create FSESC "servo" output
-#define ESC_R_PIN 5
+#define ESC_R_PIN 15
 #define ESC_MIN 800
 #define ESC_MAX 2000
 
@@ -29,4 +29,6 @@ void loop() {
 	}
 
 	ESC_RIGHT.write(scroll);
+
+  delay(10);
 }
