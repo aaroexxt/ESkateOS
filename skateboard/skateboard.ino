@@ -94,7 +94,7 @@ VescUart VUART;
 // Radio
 RF24 radio(0, 1);
 const byte addresses[][6] = {"00001", "00002"};  // Read at addr 00001, write at addr 00002
-float dataRx[3];                                // Double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes (no dynamic payload)
+float dataRx[3];                                 // Double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes (no dynamic payload)
 float dataTx[3];
 unsigned long lastHBTime = 0;  // Time when heartbeat signal was last recieved
 boolean radioListening = false;
@@ -118,15 +118,15 @@ int MASTER_STATE = 0;
 
 unsigned long prevLoopMillis = 0;
 
-// Physical Constants 
+// Physical Constants
 // TODO: set these variables, should be imperial units (we want MPH) delete this comment when complete
 const int motorPoles = 7;
-const int motorPulley = 14; // Inches
-const int wheelPulley = 36; // Inches
+const int motorPulley = 14;  // Inches
+const int wheelPulley = 36;  // Inches
 const double gearRatio = (double)motorPulley / (double)wheelPulley;
-const double wheelDiameter = 3.54331;  // Inches                                  
-const double VBATT_MIN = 3.2; // Voltage
-const double VBATT_MAX = 4.4; // Voltage
+const double wheelDiameter = 3.54331;  // Inches
+const double VBATT_MIN = 3.2;          // Voltage
+const double VBATT_MAX = 4.4;          // Voltage
 
 // Enums
 typedef enum {
@@ -219,18 +219,18 @@ void setup() {
 
     DEBUG_PRINT(F("Setup leds: ok"));
 
-//    // Setup VESC UART
-//    delay(initialVESCDelay);
-//    DEBUG_PRINT(F("bef vesc init"));
-//    VUART.setSerialPort(&Serial);
-//    DEBUG_PRINT(F("aft vesc init"));
+    //    // Setup VESC UART
+    //    delay(initialVESCDelay);
+    //    DEBUG_PRINT(F("bef vesc init"));
+    //    VUART.setSerialPort(&Serial);
+    //    DEBUG_PRINT(F("aft vesc init"));
 
-//    if (VUART.getVescValues()) {
-//        DEBUG_PRINT(F("VESC intialComm: ok"));
-//    } else {
-//        displayErrorCode(true, 1, 0, 0);
-//        DEBUG_PRINT(F("VESC initialComm: err"));
-//    }
+    //    if (VUART.getVescValues()) {
+    //        DEBUG_PRINT(F("VESC intialComm: ok"));
+    //    } else {
+    //        displayErrorCode(true, 1, 0, 0);
+    //        DEBUG_PRINT(F("VESC initialComm: err"));
+    //    }
 
     // Go to state 0; waiting for connection
     transitionState(0);
@@ -241,69 +241,75 @@ void loop() {
     unsigned long currentMillis = millis();
     int mappedVal;
 
-//    if (currentMillis - prevVescMillis >= vescDelay && !error) {
-//        prevVescMillis = currentMillis;
-//        sendVESCData();
-//    }
+    //    if (currentMillis - prevVescMillis >= vescDelay && !error) {
+    //        prevVescMillis = currentMillis;
+    //        sendVESCData();
+    //    }
     if (currentMillis - prevLEDMillis >= LEDdelay && !error) {  // Make sure the leds are enabled
         prevLEDMillis = currentMillis;
-        if (turnSignalStates == NOTTURNING) {
-            if (ledState > LEDSTATE_OFF) {
-                switch (ledState) {
-                    case LEDSTATE_INITCHASE:
-                        LEDdelay = LEDdelayLong;
-                        for (int i = 0; i < NUM_LEDS_BOARD; i++) {
-                            if ((i + ledPosition) % 5 == 0) {
-                                leds[i] = CRGB::Blue;
-                            } else {
-                                leds[i] = CRGB::Black;
-                            }
+        if (turnSignalStates == NOTTURNING && ledState != LEDSTATE_OFF) {
+            switch (ledState) {
+                case LEDSTATE_INITCHASE:
+                    LEDdelay = LEDdelayLong;
+                    for (int i = 0; i < NUM_LEDS_BOARD; i++) {
+                        if ((i + ledPosition) % 5 == 0) {
+                            leds[i] = CRGB::Blue;
+                        } else {
+                            leds[i] = CRGB::Black;
                         }
-                        ledPosition++;
-                        if (ledPosition > 4) {
-                            ledPosition = 0;
-                        }
-                        break;
-                    case LEDSTATE_RAINBOW:
-                        LEDdelay = LEDdelayShort;
-                        fill_rainbow(leds, NUM_LEDS_BOARD, millis() / 10, 7);
+                    }
+                    ledPosition++;
+                    if (ledPosition > 4) {
+                        ledPosition = 0;
+                    }
+                    break;
+                case LEDSTATE_RAINBOW:
+                    LEDdelay = LEDdelayShort;
+                    fill_rainbow(leds, NUM_LEDS_BOARD, millis() / 10, 7);
 
-                        if (realPPM > ESC_STOP) {                                 // Put a tint on if we're not braking
-                            mappedVal = map(realPPM, ESC_STOP, ESC_MAX, 0, 150);  // Fade lights by 0 to 150 out of 255 in all RGB channels (towards white) based on dthrott
-                            CRGB tintAmnt = CRGB(mappedVal, mappedVal, mappedVal);
-                            for (int i = 0; i < NUM_LEDS_BOARD; i++) {
-                                leds[i] += tintAmnt;
-                            }
-                        }
-                        break;
-                    case LEDSTATE_CHGTHROTT:  // Color changes based on throttle (chaser again)
-                        LEDdelay = LEDdelayShort;
-                        mappedVal = map(realPPM, ESC_MIN, ESC_MAX, 255, 0);
+                    if (realPPM > ESC_STOP) {                                 // Put a tint on if we're not braking
+                        mappedVal = map(realPPM, ESC_STOP, ESC_MAX, 0, 150);  // Fade lights by 0 to 150 out of 255 in all RGB channels (towards white) based on dthrott
+                        CRGB tintAmnt = CRGB(mappedVal, mappedVal, mappedVal);
                         for (int i = 0; i < NUM_LEDS_BOARD; i++) {
-                            leds[i] = CRGB(mappedVal, 255 - mappedVal, 0);  // Modify Red and Green channel to be inverses to go between red and green as you accel (and yellow in the middle)
+                            leds[i] += tintAmnt;
                         }
-                        break;
-                }
+                    }
+                    break;
+                case LEDSTATE_CHGTHROTT:  // Color changes based on throttle (chaser again)
+                    LEDdelay = LEDdelayShort;
+                    mappedVal = map(realPPM, ESC_MIN, ESC_MAX, 255, 0);
+                    for (int i = 0; i < NUM_LEDS_BOARD; i++) {
+                        leds[i] = CRGB(mappedVal, 255 - mappedVal, 0);  // Modify Red and Green channel to be inverses to go between red and green as you accel (and yellow in the middle)
+                    }
+                    break;
             }
         } else {
             LEDdelay = LEDdelayTurnSignal;
-
-            if (turnSignalStates == LEDSTATE_TURNRIGHT) {
-                for (int i = 0; i < NUM_LEDS_BOARD / 2; i++) {
-                    leds[i] = CRGB::Red;
-                }
-                for (int i = NUM_LEDS_BOARD / 2; i < NUM_LEDS_BOARD; i++) {
-                    leds[i] = CRGB::Black;
-                }
-            } else if (turnSignalStates == LEDSTATE_TURNLEFT) {
-                for (int i = 0; i < NUM_LEDS_BOARD / 2; i++) {
-                    leds[i] = CRGB::Black;
-                }
-                for (int i = NUM_LEDS_BOARD / 2; i < NUM_LEDS_BOARD; i++) {
-                    leds[i] = CRGB::Red;
-                }
-            } else {
-                writeBoardLEDSSolid(CRGB::Black);
+            switch (turnSignalStates) {
+                case LEDSTATE_TURNRIGHT:
+                    for (int i = 0; i < 8; i++) {
+                        leds[i] = CRGB::Red;
+                    }
+                    for (int i = NUM_LEDS_BOARD - 5; i < NUM_LEDS_BOARD; i++) {
+                        leds[i] = CRGB::Red;
+                    }
+                    for (int i = 8; i < (NUM_LEDS_BOARD - 5); i++) {
+                        leds[i] = CRGB::Black;
+                    }
+                    break;
+                case LEDSTATE_TURNLEFT:
+                    for (int i = 0; i < 8; i++) {
+                        leds[i] = CRGB::Black;
+                    }
+                    for (int i = NUM_LEDS_BOARD - 5; i < NUM_LEDS_BOARD; i++) {
+                        leds[i] = CRGB::Black;
+                    }
+                    for (int i = 8; i < (NUM_LEDS_BOARD - 5); i++) {
+                        leds[i] = CRGB::Red;
+                    }
+                    break;
+                case NOTTURNING:
+                    break;
             }
         }
     }
@@ -324,87 +330,87 @@ void loop() {
 }
 
 void radioInterrupt() {
-  radioRecieveMode();
-  if (radio.available()) {
-    Serial.println("RAD RECV");
-    resetDataRx();
-    radio.read(&dataRx, sizeof(dataRx));
-    Serial.println(dataRx[0]);
+    radioRecieveMode();
+    if (radio.available()) {
+        Serial.println("RAD RECV");
+        resetDataRx();
+        radio.read(&dataRx, sizeof(dataRx));
+        Serial.println(dataRx[0]);
 
-    switch (MASTER_STATE) {
-        // Waiting for first hb signal from controller
-        case 0:
-            if (dataRx[0] == HEARTBEAT) {  // 200 is "heartbeat" signal
-                DEBUG_PRINT(F("Got first heartbeat signal from controller; we're go"));
-                ledState = 0;  // Make sure LEDs are off
+        switch (MASTER_STATE) {
+            // Waiting for first hb signal from controller
+            case 0:
+                if (dataRx[0] == HEARTBEAT) {  // 200 is "heartbeat" signal
+                    DEBUG_PRINT(F("Got first heartbeat signal from controller; we're go"));
+                    ledState = 0;  // Make sure LEDs are off
 
-                radioTransmitMode();
-                resetDataTx();
-                dataTx[0] = HEARTBEAT;
-                radio.write(&dataTx, sizeof(dataTx));  // Send one back
-
-                delay(50);
-                dataTx[0] = TONE;
-                dataTx[1] = 2550;                      // Tone (g)
-                dataTx[2] = 200;                       // Time
-                radio.write(&dataTx, sizeof(dataTx));  // Send pitch command
-
-                lastHBTime = millis();
-                transitionState(1);
-            }
-            break;
-        case 1:  // Standard operation
-            switch ((int)dataRx[0]) {
-                case THROTTLE_VAL:  // 1 is throttle update
-                    realRAW = dataRx[1];
-                    break;
-                case THROTTLE_SW:
-                    throttleEnabled = dataRx[1];
-                    break;
-                case LEDMODE:                            // 2 is led mode update
-                    if (dataRx[1] <= 3) {                // Sanity check for max LED state
-                        if (dataRx[1] == 0 && !error) {  // If it's zero; clear everything and write
-                            writeBoardLEDSSolid(CRGB::Black);
-                            FastLED.show();
-                        }
-                        ledState = dataRx[1];
-                    }
-                    break;
-                case TURNSIGNAL:
-                    if (turnSignalStates <= 2) {
-                        turnSignalStates++;
-                    } else {
-                        turnSignalStates -= 2;
-                    }
-                    break;
-                case HEARTBEAT:
                     radioTransmitMode();
                     resetDataTx();
                     dataTx[0] = HEARTBEAT;
+                    radio.write(&dataTx, sizeof(dataTx));  // Send one back
+
+                    delay(50);
+                    dataTx[0] = TONE;
+                    dataTx[1] = 2550;                      // Tone (g)
+                    dataTx[2] = 200;                       // Time
+                    radio.write(&dataTx, sizeof(dataTx));  // Send pitch command
+
+                    lastHBTime = millis();
+                    transitionState(1);
+                }
+                break;
+            case 1:  // Standard operation
+                switch ((int)dataRx[0]) {
+                    case THROTTLE_VAL:  // 1 is throttle update
+                        realRAW = dataRx[1];
+                        break;
+                    case THROTTLE_SW:
+                        throttleEnabled = dataRx[1];
+                        break;
+                    case LEDMODE:                            // 3 is led mode update
+                        if (dataRx[1] <= 3) {                // Sanity check for max LED state
+                            if (dataRx[1] == 0 && !error) {  // If it's zero; clear everything and write
+                                writeBoardLEDSSolid(CRGB::Black);
+                                FastLED.show();
+                            }
+                            ledState = dataRx[1];
+                        }
+                        break;
+                    case TURNSIGNAL:
+                        if (turnSignalStates <= 2) {
+                            turnSignalStates++;
+                        } else {
+                            turnSignalStates -= 2;
+                        }
+                        break;
+                    case HEARTBEAT:
+                        radioTransmitMode();
+                        resetDataTx();
+                        dataTx[0] = HEARTBEAT;
+                        radio.write(&dataTx, sizeof(dataTx));
+
+                        lastHBTime = millis();
+                        break;
+                }
+            case 2:  // Lost connection case
+                if (dataRx[0] == HEARTBEAT) {
+                    DEBUG_PRINT(F("Got heartbeat signal from controller after disconnection"));
+                    ledState = 0;
+
+                    radioTransmitMode();
+                    resetDataTx();
+                    dataTx[0] = SENDALLDATA;  // Set sendAllData flag (SAD flag) on controller to poll all values
                     radio.write(&dataTx, sizeof(dataTx));
 
                     lastHBTime = millis();
-                    break;
-            }
-        case 2:  // Lost connection case
-            if (dataRx[0] == HEARTBEAT) {
-                DEBUG_PRINT(F("Got heartbeat signal from controller after disconnection"));
-                ledState = 0;
-
-                radioTransmitMode();
-                resetDataTx();
-                dataTx[0] = SENDALLDATA;  // Set sendAllData flag (SAD flag) on controller to poll all values
-                radio.write(&dataTx, sizeof(dataTx));
-
-                lastHBTime = millis();
-                transitionState(1);  // Go back to normal operation
-            }
-            break;
-        default:
-            DEBUG_PRINT(F("Undefined state; resetting"));
-            transitionState(0);
+                    transitionState(1);  // Go back to normal operation
+                }
+                break;
+            default:
+                DEBUG_PRINT(F("Undefined state; resetting"));
+                transitionState(0);
+        }
     }
-  }
 }
 
 void transitionState(int newState) {
@@ -578,7 +584,8 @@ double getSpeed() {
 double getBattPercent() {
     if (VUART.getVescValues()) {
         float inpVoltage = (float)VUART.data.inpVoltage;
-        float voltageRounded = ((inpVoltage < VBATT_MIN) ? VBATT_MIN : (inpVoltage > VBATT_MAX) ? VBATT_MAX : inpVoltage);
+        float voltageRounded = ((inpVoltage < VBATT_MIN) ? VBATT_MIN : (inpVoltage > VBATT_MAX) ? VBATT_MAX
+                                                                                                : inpVoltage);
         return mapFloat(voltageRounded, VBATT_MIN, VBATT_MAX, 0, 100);
     } else {
         DEBUG_PRINT(F("Vesc data get fail"));
