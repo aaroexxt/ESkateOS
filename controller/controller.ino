@@ -50,7 +50,7 @@ const boolean debug = false;
 #define THROTTLE_STOP (THROTTLE_MIN + THROTTLE_MAX) / 2
 #define HALL_MIN 266
 #define HALL_MAX 793
-#define HALL_CENTER (HALL_MIN+HALL_MAX)/2
+#define HALL_CENTER (HALL_MIN + HALL_MAX) / 2
 
 // Screen constants
 #define SCREEN_WIDTH 128  // OLED display width, in pixels
@@ -189,7 +189,7 @@ void setup() {
     // Setup radio
     radio.begin();
     radio.setPALevel(RF24_PA_MAX);  // Max because we don't want to lose connection
-    radio.setRetries(3, 3);             // Delay, count
+    radio.setRetries(3, 3);         // Delay, count
 
     // CONTROLLER Writes to addr 1, reads from addr 2
     radio.openWritingPipe(addresses[0]);
@@ -226,14 +226,60 @@ void setup() {
 }
 
 void loop() {
-    radioInterrupt();
+    radioRecieveMode();
+    if (radio.available()) {
+        resetDataRx();
+        radio.read(&dataRx, sizeof(dataRx));
+
+        if (MASTER_STATE == 0 && dataRx[0] == 200) {
+            DEBUG_PRINT(F("Got first heartbeat signal from board"));
+            connected = true;  // Set connected flag
+            transitionState(1);
+        }
+
+        boolean vvNew = false;  // Keep track of new data from vesc; did it actually arrive
+
+        switch ((int)dataRx[0]) {
+            case HEARTBEAT:  // Board -> remote heartbeats
+                lastHBTime = millis();
+                break;
+            case SENDALLDATA:
+                sendAllRadioCommands();
+                break;
+            case VESCDATA:  // ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is batt percent
+                switch ((int)dataRx[1]) {
+                    case 0:
+                        vesc_values_realtime.speed = dataRx[2];
+                        vvNew = true;
+                        break;
+                    case 1:
+                        vesc_values_realtime.battPercent = dataRx[2];
+                        vvNew = true;
+                        break;
+                }
+                break;
+            case TONE:
+                asynchTone(dataRx[1], dataRx[2]);  // Tone, time
+                break;
+        }
+        if (vvNew && displayVESCData) {
+            DEBUG_PRINT(F("New VESC data recieved\nSpeed: "));
+            DEBUG_PRINT(String(vesc_values_realtime.speed));
+            DEBUG_PRINT(F("Distance travelled: "));
+            DEBUG_PRINT(String(vesc_values_realtime.distanceTravelled));
+            DEBUG_PRINT(F("Input voltage: "));
+            DEBUG_PRINT(String(vesc_values_realtime.inputVoltage));
+            DEBUG_PRINT(F("Batt percent: "));
+            DEBUG_PRINT(String(vesc_values_realtime.battPercent));
+        }
+    }
     // Check/update throttle state, since that should happen no matter what because of safety
-  
+
     switch (MASTER_STATE) {
         case 0:  // 0 is waiting for board response because hb signals are being sent constantly
             radioRecieveMode();
             if (digitalRead(THROTT_ENABLE_BUTTON)) {
-              transitionState(1);
+                transitionState(1);
             }
             break;
 
@@ -254,7 +300,6 @@ void loop() {
                 oldThrottleEnabled = throttleEnabled;
             }
 
-                
             // Update hall effect sensor
             int measurement = 0;
             for (int i = 0; i < 10; i++) {  // Take average reading over 10 samples to reduce noise
@@ -329,11 +374,11 @@ void loop() {
                 // Now send the data since there's been an update
                 radioTransmitMode();
                 resetDataTx();
-                dataTx[0] = TURNSIGNAL;  
+                dataTx[0] = TURNSIGNAL;
                 dataTx[1] = turnSignalMode;
                 radio.write(&dataTx, sizeof(dataTx));
             }
-            
+
             if (millis() - prevRadioResendMillis >= radioResendInterval) {  // Check if we should send all radio commands
                 sendAllRadioCommands();                                     // Don't need to send second HB signal because it was already send in sendAllRadioCommands
                 prevHBMillis = millis();
@@ -369,56 +414,6 @@ void loop() {
         updateDisplay(DISPU_FULL);
     }
     radioRecieveMode();  // Default to recieve mode so as to not drop transmissions
-}
-
-void radioInterrupt() {
-  radioRecieveMode();
-  if (radio.available()) {
-    resetDataRx();
-      radio.read(&dataRx, sizeof(dataRx));
-  
-      if (MASTER_STATE == 0 && dataRx[0] == 200) {
-          DEBUG_PRINT(F("Got first heartbeat signal from board"));
-          connected = true;  // Set connected flag
-          transitionState(1);
-      }
-  
-      boolean vvNew = false;  // Keep track of new data from vesc; did it actually arrive
-  
-      switch ((int)dataRx[0]) {
-          case HEARTBEAT:  // Board -> remote heartbeats
-              lastHBTime = millis();
-              break;
-          case SENDALLDATA:
-              sendAllRadioCommands();
-              break;
-          case VESCDATA:  // ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is batt percent
-              switch ((int)dataRx[1]) {
-                  case 0:
-                      vesc_values_realtime.speed = dataRx[2];
-                      vvNew = true;
-                      break;
-                  case 1:
-                      vesc_values_realtime.battPercent = dataRx[2];
-                      vvNew = true;
-                      break;
-              }
-              break;
-          case TONE:
-              asynchTone(dataRx[1], dataRx[2]);  // Tone, time
-              break;
-      }
-      if (vvNew && displayVESCData) {
-          DEBUG_PRINT(F("New VESC data recieved\nSpeed: "));
-          DEBUG_PRINT(String(vesc_values_realtime.speed));
-          DEBUG_PRINT(F("Distance travelled: "));
-          DEBUG_PRINT(String(vesc_values_realtime.distanceTravelled));
-          DEBUG_PRINT(F("Input voltage: "));
-          DEBUG_PRINT(String(vesc_values_realtime.inputVoltage));
-          DEBUG_PRINT(F("Batt percent: "));
-          DEBUG_PRINT(String(vesc_values_realtime.battPercent));
-      }
-  }
 }
 
 void transitionState(int newState) {
@@ -598,7 +593,7 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                             suffix = F("V");
                             value = vesc_values_realtime.inputVoltage;
                             decimals = 1;
-                            
+
                             break;
                     }
 

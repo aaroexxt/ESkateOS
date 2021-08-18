@@ -185,7 +185,7 @@ void setup() {
     // Setup radio
     radio.begin();
     radio.setPALevel(RF24_PA_MAX);  // Max because we don't want to lose connection
-    radio.setRetries(3, 3);         // Delay, count
+    radio.setRetries(3, 3);
 
     // Skateboard writes to addr 2, reads from addr 1
     radio.openWritingPipe(addresses[1]);
@@ -237,7 +237,6 @@ void setup() {
 }
 
 void loop() {
-    radioInterrupt();
     unsigned long currentMillis = millis();
     int mappedVal;
 
@@ -245,6 +244,78 @@ void loop() {
     //        prevVescMillis = currentMillis;
     //        sendVESCData();
     //    }
+
+    radioRecieveMode();
+    if (radio.available()) {
+        Serial.println("RAD RECV");
+        resetDataRx();
+        radio.read(&dataRx, sizeof(dataRx));
+        Serial.println(dataRx[0]);
+
+        switch (MASTER_STATE) {
+            // Waiting for first hb signal from controller
+            case 0:
+                if (dataRx[0] == HEARTBEAT) {  // 200 is "heartbeat" signal
+                    DEBUG_PRINT(F("Got first heartbeat signal from controller; we're go"));
+                    ledState = 0;  // Make sure LEDs are off
+
+                    radioTransmitMode();
+                    resetDataTx();
+                    dataTx[0] = HEARTBEAT;
+                    radio.write(&dataTx, sizeof(dataTx));  // Send one back
+
+                    delay(50);
+                    dataTx[0] = TONE;
+                    dataTx[1] = 2550;                      // Tone (g)
+                    dataTx[2] = 200;                       // Time
+                    radio.write(&dataTx, sizeof(dataTx));  // Send pitch command
+
+                    lastHBTime = millis();
+                    transitionState(1);
+                }
+                break;
+            case 1:  // Standard operation
+                switch ((int)dataRx[0]) {
+                    case THROTTLE_VAL:  // 1 is throttle update
+                        realRAW = dataRx[1];
+                        break;
+                    case THROTTLE_SW:
+                        throttleEnabled = dataRx[1];
+                        break;
+                    case LEDMODE:  // 3 is led mode update
+                        ledState = dataRx[1];
+                        break;
+                    case TURNSIGNAL:
+                        turnSignalStates = dataRx[1];
+                        break;
+                    case HEARTBEAT:
+                        lastHBTime = millis();
+                        radioTransmitMode();
+                        resetDataTx();
+                        dataTx[0] = HEARTBEAT;
+                        radio.write(&dataTx, sizeof(dataTx));
+                        break;
+                }
+            case 2:  // Lost connection case
+                if (dataRx[0] == HEARTBEAT) {
+                    DEBUG_PRINT(F("Got heartbeat signal from controller after disconnection"));
+                    ledState = 0;
+
+                    radioTransmitMode();
+                    resetDataTx();
+                    dataTx[0] = SENDALLDATA;  // Set sendAllData flag (SAD flag) on controller to poll all values
+                    radio.write(&dataTx, sizeof(dataTx));
+
+                    lastHBTime = millis();
+                    transitionState(1);  // Go back to normal operation
+                }
+                break;
+            default:
+                DEBUG_PRINT(F("Undefined state; resetting"));
+                transitionState(0);
+        }
+    }
+
     if (currentMillis - prevLEDMillis >= LEDdelay && !error) {  // Make sure the leds are enabled
         prevLEDMillis = currentMillis;
         if (turnSignalStates == NOTTURNING && ledState != LEDSTATE_OFF) {
@@ -318,7 +389,7 @@ void loop() {
     FastLED.show();
 
     // Have we lost connection with the controller while operating normally? welp then we should prolly cut motors
-    if (currentMillis - lastHBTime >= HBTimeoutMax && MASTER_STATE == 1) {
+    if (millis() - lastHBTime >= HBTimeoutMax && MASTER_STATE == 1) {
         transitionState(2);
     }
 
@@ -327,86 +398,6 @@ void loop() {
     updateESC();  // Update ESC with throttle value
 
     radioRecieveMode();  // Set radio back to recieve mode at end of loop
-}
-
-void radioInterrupt() {
-    radioRecieveMode();
-    if (radio.available()) {
-        Serial.println("RAD RECV");
-        resetDataRx();
-        radio.read(&dataRx, sizeof(dataRx));
-        Serial.println(dataRx[0]);
-
-        switch (MASTER_STATE) {
-            // Waiting for first hb signal from controller
-            case 0:
-                if (dataRx[0] == HEARTBEAT) {  // 200 is "heartbeat" signal
-                    DEBUG_PRINT(F("Got first heartbeat signal from controller; we're go"));
-                    ledState = 0;  // Make sure LEDs are off
-
-                    radioTransmitMode();
-                    resetDataTx();
-                    dataTx[0] = HEARTBEAT;
-                    radio.write(&dataTx, sizeof(dataTx));  // Send one back
-
-                    delay(50);
-                    dataTx[0] = TONE;
-                    dataTx[1] = 2550;                      // Tone (g)
-                    dataTx[2] = 200;                       // Time
-                    radio.write(&dataTx, sizeof(dataTx));  // Send pitch command
-
-                    lastHBTime = millis();
-                    transitionState(1);
-                }
-                break;
-            case 1:  // Standard operation
-                switch ((int)dataRx[0]) {
-                    case THROTTLE_VAL:  // 1 is throttle update
-                        realRAW = dataRx[1];
-                        break;
-                    case THROTTLE_SW:
-                        throttleEnabled = dataRx[1];
-                        break;
-                    case LEDMODE:                            // 3 is led mode update
-                        if (dataRx[1] <= 3) {                // Sanity check for max LED state
-                            if (dataRx[1] == 0 && !error) {  // If it's zero; clear everything and write
-                                writeBoardLEDSSolid(CRGB::Black);
-                                FastLED.show();
-                            }
-                            ledState = dataRx[1];
-                        }
-                        break;
-                    case TURNSIGNAL:
-                        turnSignalStates = dataRx[1];
-                        break;
-                    case HEARTBEAT:
-                        radioTransmitMode();
-                        resetDataTx();
-                        dataTx[0] = HEARTBEAT;
-                        radio.write(&dataTx, sizeof(dataTx));
-
-                        lastHBTime = millis();
-                        break;
-                }
-            case 2:  // Lost connection case
-                if (dataRx[0] == HEARTBEAT) {
-                    DEBUG_PRINT(F("Got heartbeat signal from controller after disconnection"));
-                    ledState = 0;
-
-                    radioTransmitMode();
-                    resetDataTx();
-                    dataTx[0] = SENDALLDATA;  // Set sendAllData flag (SAD flag) on controller to poll all values
-                    radio.write(&dataTx, sizeof(dataTx));
-
-                    lastHBTime = millis();
-                    transitionState(1);  // Go back to normal operation
-                }
-                break;
-            default:
-                DEBUG_PRINT(F("Undefined state; resetting"));
-                transitionState(0);
-        }
-    }
 }
 
 void transitionState(int newState) {
@@ -425,6 +416,9 @@ void transitionState(int newState) {
             break;
         case 2:  // We are going into remote disconnect mode
             DEBUG_PRINT(F("We've lost connection to the remote"));
+            writeBoardLEDSSolid(CRGB::Green);
+            FastLED.show();
+
             realRAW = HALL_STOP;  // Set target to 0 speed to bring us back down to 0 speed
             // DO NOT set realPPM to ESC_STOP, because this would instantly drop power to 0, meaning I could get thrown off the board
 
