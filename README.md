@@ -4,11 +4,11 @@ ESkateOS was made to control my custom electric skateboard, which has gone throu
 
 ## Branch Structure
 
-| Branch Name         | Board HW Version      | Remote HW Version | Notes                               |   |   |
-|---------------------|-----------------------|-------------------|-------------------------------------|---|---|
-| HWV1                | V1 - Aaron's original | V1-V4             |                                     |   |   |
-| HWV2-ilan           | V2 - Current longboard    | V7                |                                     |   |   |
-| HWV2-aaron          | V2                    | V7                | LED/headlight power switching       |   |   |
-| tools               | V1/V2                 | -                 | Various tools used during testing   |   |   |
-| Hardware-Board      | V1-V2                 | -                 | PCB and design files for board      |   |   |
-| Hardware-Controller | -                     | V1-V7             | PCB and design files for controller |   |   |
+| Branch Name         | Board HW Version      | Remote HW Version | Notes                               |
+|---------------------|-----------------------|-------------------|-------------------------------------|
+| HWV1                | V1 - Aaron's original | V1-V4             |                                     |
+| HWV2-ilan           | V2 - Current board    | V7                |                                     |
+| HWV2-aaron          | V2                    | V7                | LED/headlight power switching       |
+| tools               | V1-V2                 | V1-V7             | Various tools used during testing   |
+| Hardware-Board      | V1-V2                 | -                 | PCB and design files for board      |
+| Hardware-Controller | -                     | V1-V7             | PCB and design files for controller |
