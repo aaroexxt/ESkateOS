@@ -292,7 +292,7 @@ void loop() {
             }
 
             // LEDs
-            int LEDReading = digitalRead(LED_BUTTON);  // Input pullup invert inputs (since it'll be pulled to ground if high)
+            int LEDReading = !digitalRead(LED_BUTTON);  // Input pullup invert inputs (since it'll be pulled to ground if high)
             if (LEDReading && (millis() - lastLEDDebounceTime) > debounceDelay) {
                 lastLEDDebounceTime = millis();
                 ledMode++;
@@ -313,7 +313,7 @@ void loop() {
             }
 
             // Turn Signals
-            int turnSignalReading = digitalRead(TURN_SIGNAL_BUTTON);  // Input pullup invert inputs (since it'll be pulled to ground if high)
+            int turnSignalReading = !digitalRead(TURN_SIGNAL_BUTTON);  // Input pullup invert inputs (since it'll be pulled to ground if high)
             if (turnSignalReading && (millis() - lastTSDebounceTime) > debounceDelay) {
                 lastTSDebounceTime = millis();
                 turnSignalMode++;
