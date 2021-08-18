@@ -104,6 +104,7 @@ CRGB leds[NUM_LEDS_BOARD];
 unsigned long prevLEDMillis = 0;
 int LEDdelay = LEDdelayLong;
 int ledPosition = 0;  // Current position in strip for pattern
+int mappedVal;
 
 // VESC
 unsigned long prevVescMillis = 0;
@@ -237,14 +238,10 @@ void setup() {
 }
 
 void loop() {
-    unsigned long currentMillis = millis();
-    int mappedVal;
-
     //    if (currentMillis - prevVescMillis >= vescDelay && !error) {
     //        prevVescMillis = currentMillis;
     //        sendVESCData();
     //    }
-
     radioRecieveMode();
     if (radio.available()) {
         Serial.println("RAD RECV");
@@ -276,13 +273,13 @@ void loop() {
                 break;
             case 1:  // Standard operation
                 switch ((int)dataRx[0]) {
-                    case THROTTLE_VAL:  // 1 is throttle update
+                    case THROTTLE_VAL:
                         realRAW = dataRx[1];
                         break;
                     case THROTTLE_SW:
                         throttleEnabled = dataRx[1];
                         break;
-                    case LEDMODE:  // 3 is led mode update
+                    case LEDMODE:
                         ledState = dataRx[1];
                         break;
                     case TURNSIGNAL:
@@ -299,7 +296,7 @@ void loop() {
             case 2:  // Lost connection case
                 if (dataRx[0] == HEARTBEAT) {
                     DEBUG_PRINT(F("Got heartbeat signal from controller after disconnection"));
-                    ledState = 0;
+                    // ledState = 0;
 
                     radioTransmitMode();
                     resetDataTx();
@@ -316,9 +313,14 @@ void loop() {
         }
     }
 
-    if (currentMillis - prevLEDMillis >= LEDdelay && !error) {  // Make sure the leds are enabled
-        prevLEDMillis = currentMillis;
-        if (turnSignalStates == NOTTURNING && ledState != LEDSTATE_OFF) {
+    // Have we lost connection with the controller while operating normally? welp then we should prolly cut motors
+    if (millis() - lastHBTime >= HBTimeoutMax && MASTER_STATE == 1) {
+        transitionState(2);
+    }
+
+    if (millis() - prevLEDMillis >= LEDdelay) {
+        prevLEDMillis = millis();
+        if (turnSignalStates == NOTTURNING) {
             switch (ledState) {
                 case LEDSTATE_INITCHASE:
                     LEDdelay = LEDdelayLong;
@@ -355,9 +357,9 @@ void loop() {
                     break;
             }
         } else {
-            LEDdelay = LEDdelayTurnSignal;
             switch (turnSignalStates) {
                 case LEDSTATE_TURNRIGHT:
+                    LEDdelay = LEDdelayTurnSignal;
                     for (int i = 0; i < 8; i++) {
                         leds[i] = CRGB::Red;
                     }
@@ -369,6 +371,8 @@ void loop() {
                     }
                     break;
                 case LEDSTATE_TURNLEFT:
+                    LEDdelay = LEDdelayTurnSignal;
+
                     for (int i = 0; i < 8; i++) {
                         leds[i] = CRGB::Black;
                     }
@@ -379,19 +383,11 @@ void loop() {
                         leds[i] = CRGB::Red;
                     }
                     break;
-                case NOTTURNING:
-                    break;
             }
         }
     }
 
-    // Tell library to send LED state to LEDs
     FastLED.show();
-
-    // Have we lost connection with the controller while operating normally? welp then we should prolly cut motors
-    if (millis() - lastHBTime >= HBTimeoutMax && MASTER_STATE == 1) {
-        transitionState(2);
-    }
 
     // # TODO: Add calc speed code to main loop
 
@@ -416,7 +412,7 @@ void transitionState(int newState) {
             break;
         case 2:  // We are going into remote disconnect mode
             DEBUG_PRINT(F("We've lost connection to the remote"));
-            writeBoardLEDSSolid(CRGB::Green);
+            writeBoardLEDSSolid(CRGB::Red);
             FastLED.show();
 
             realRAW = HALL_STOP;  // Set target to 0 speed to bring us back down to 0 speed
@@ -431,7 +427,6 @@ void transitionState(int newState) {
 // SAFETY-CRITICAL CODE
 
 void updateESC() {
-    unsigned long currentMillis = millis();
 
     int targetPPM = ESC_STOP;  // Initialize tPPM
     if (throttleEnabled) {
@@ -447,7 +442,7 @@ void updateESC() {
         targetPPM = ESC_STOP;
     }
 
-    unsigned long deltaTime = currentMillis - prevLoopMillis;
+    unsigned long deltaTime = millis() - prevLoopMillis;
 
     int jumpThrottUpperLimit = (ESC_STOP + PPM_JUMP_VALUE);
     int jumpThrottLowerLimit = (ESC_STOP - PPM_JUMP_VALUE);
@@ -472,7 +467,7 @@ void updateESC() {
         realPPM += deltaPPM;
     }
     realPPM = constrain(realPPM, ESC_MIN, ESC_MAX);  // Make sure we're within limits for safety
-    prevLoopMillis = currentMillis;
+    prevLoopMillis = millis();
 
     // For Human Readability
     DEBUG_PRINT(F("Target: "));

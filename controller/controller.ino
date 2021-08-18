@@ -63,7 +63,7 @@ const boolean debug = false;
 
 // Misc
 #define displayStateOneChangeTime 4000
-#define debounceDelay 250
+#define debounceDelay 400
 
 // Hardware declaration
 
@@ -342,8 +342,9 @@ void loop() {
                 lastLEDDebounceTime = millis();
                 ledMode++;
                 // There are 4 LED states 0-3 if ledMode goes above 3 it should loop back to 0
-                ledMode = (ledMode = 4) ? 0 : ledMode;
-
+                if (ledMode == 4) {
+                    ledMode = 0;
+                }
                 // Update display
                 updateDisplayFlag = true;  // Set display update flag for next timer cycle
                 DEBUG_PRINT(F("LEDChgState:"));
@@ -364,8 +365,9 @@ void loop() {
                 turnSignalMode++;
 
                 // There are 4 LED states 0-3 if ledMode goes above 3 it should loop back to 0
-                turnSignalMode = (turnSignalMode = 3) ? 0 : turnSignalMode;
-
+                if (turnSignalMode == 3) {
+                    turnSignalMode = 0;
+                }
                 // Update display
                 updateDisplayFlag = true;  // Set display update flag for next timer cycle
                 DEBUG_PRINT(F("LEDChgState to turn signal:"));
@@ -435,16 +437,6 @@ void sendAllRadioCommands() {  // Sends all commands to board
 
     resetDataTx();
     dataTx[0] = HEARTBEAT;
-    radio.write(&dataTx, sizeof(dataTx));
-
-    resetDataTx();
-    dataTx[0] = LEDMODE;  // Led update
-    dataTx[1] = ledMode;
-    radio.write(&dataTx, sizeof(dataTx));
-
-    resetDataTx();
-    dataTx[0] = TURNSIGNAL;  // Turn signal update
-    dataTx[1] = turnSignalMode;
     radio.write(&dataTx, sizeof(dataTx));
 
     resetDataTx();
