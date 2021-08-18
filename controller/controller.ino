@@ -63,7 +63,7 @@ const boolean debug = false;
 
 // Misc
 #define displayStateOneChangeTime 4000
-#define debounceDelay 400
+#define debounceDelay 300
 
 // Hardware declaration
 
@@ -364,7 +364,6 @@ void loop() {
                 lastTSDebounceTime = millis();
                 turnSignalMode++;
 
-                // There are 4 LED states 0-3 if ledMode goes above 3 it should loop back to 0
                 if (turnSignalMode == 3) {
                     turnSignalMode = 0;
                 }

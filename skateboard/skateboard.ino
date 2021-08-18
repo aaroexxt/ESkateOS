@@ -139,11 +139,11 @@ typedef enum {
 int ledState = LEDSTATE_INITCHASE;
 
 typedef enum {
-    NOTTURNING = 0,
-    LEDSTATE_TURNRIGHT = 1,
-    LEDSTATE_TURNLEFT = 2
+    NOT_TURNING = 0,
+    TURNING_RIGHT = 1,
+    TURNING_LEFT = 2
 } TURNSIGNAL_STATES;
-int turnSignalStates = NOTTURNING;
+int turnSignalState = NOT_TURNING;
 
 // Data structure:
 // First int is command number (enum RADIO_COMMANDS)
@@ -283,7 +283,7 @@ void loop() {
                         ledState = dataRx[1];
                         break;
                     case TURNSIGNAL:
-                        turnSignalStates = dataRx[1];
+                        turnSignalState = dataRx[1];
                         break;
                     case HEARTBEAT:
                         lastHBTime = millis();
@@ -320,7 +320,7 @@ void loop() {
 
     if (millis() - prevLEDMillis >= LEDdelay) {
         prevLEDMillis = millis();
-        if (turnSignalStates == NOTTURNING) {
+        if (turnSignalState == NOT_TURNING) {
             switch (ledState) {
                 case LEDSTATE_INITCHASE:
                     LEDdelay = LEDdelayLong;
@@ -357,30 +357,39 @@ void loop() {
                     break;
             }
         } else {
-            switch (turnSignalStates) {
-                case LEDSTATE_TURNRIGHT:
-                    LEDdelay = LEDdelayTurnSignal;
-                    for (int i = 0; i < 8; i++) {
-                        leds[i] = CRGB::Red;
-                    }
-                    for (int i = NUM_LEDS_BOARD - 5; i < NUM_LEDS_BOARD; i++) {
-                        leds[i] = CRGB::Red;
-                    }
-                    for (int i = 8; i < (NUM_LEDS_BOARD - 5); i++) {
-                        leds[i] = CRGB::Black;
-                    }
-                    break;
-                case LEDSTATE_TURNLEFT:
-                    LEDdelay = LEDdelayTurnSignal;
+            switch (turnSignalState) {
+                case TURNING_RIGHT:
+                    LEDdelay = LEDdelayLong;
+                    if (leds[1].red > 0) {
+                        FastLED.clear();
+                    } else {
+                        for (int i = 0; i < 8; i++) {
+                            leds[i] = CRGB::Red;
+                        }
+                        for (int i = NUM_LEDS_BOARD - 5; i < NUM_LEDS_BOARD; i++) {
+                            leds[i] = CRGB::Red;
+                        }
 
-                    for (int i = 0; i < 8; i++) {
-                        leds[i] = CRGB::Black;
+                        for (int i = 8; i < (NUM_LEDS_BOARD - 5); i++) {
+                            leds[i] = CRGB::Black;
+                        }
                     }
-                    for (int i = NUM_LEDS_BOARD - 5; i < NUM_LEDS_BOARD; i++) {
-                        leds[i] = CRGB::Black;
-                    }
-                    for (int i = 8; i < (NUM_LEDS_BOARD - 5); i++) {
-                        leds[i] = CRGB::Red;
+
+                    break;
+                case TURNING_LEFT:
+                    LEDdelay = LEDdelayLong;
+                    if (leds[8].red > 0) {
+                        FastLED.clear();
+                    } else {
+                        for (int i = 0; i < 8; i++) {
+                            leds[i] = CRGB::Black;
+                        }
+                        for (int i = NUM_LEDS_BOARD - 5; i < NUM_LEDS_BOARD; i++) {
+                            leds[i] = CRGB::Black;
+                        }
+                        for (int i = 8; i < (NUM_LEDS_BOARD - 5); i++) {
+                            leds[i] = CRGB::Red;
+                        }
                     }
                     break;
             }
@@ -405,7 +414,7 @@ void transitionState(int newState) {
             ledState = LEDSTATE_INITCHASE;
             break;
         case 1:
-            if (ledState == LEDSTATE_OFF && !error) {  // Enable/disable the leds based on what's going on
+            if (ledState == LEDSTATE_OFF && turnSignalState == NOT_TURNING && !error) {  // Enable/disable the leds based on what's going on
                 FastLED.clear();
                 FastLED.show();
             }
@@ -427,7 +436,6 @@ void transitionState(int newState) {
 // SAFETY-CRITICAL CODE
 
 void updateESC() {
-
     int targetPPM = ESC_STOP;  // Initialize tPPM
     if (throttleEnabled) {
         realRAW = constrain(realRAW, HALL_MIN, HALL_MAX);                // Constrain raw value
