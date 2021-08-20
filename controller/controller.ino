@@ -133,7 +133,7 @@ const unsigned char signal_noconnection_bits[] = {
 
 char displayBuffer[20];
 
-const byte addresses[][6] = {"00003", "00004"};  // Write at addr 00003, read at addr 00004
+const byte addresses[][6] = {"00001", "00002"};  // Write at addr 00003, read at addr 00004
 
 String displayString;
 typedef enum {

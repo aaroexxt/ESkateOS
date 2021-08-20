@@ -58,7 +58,7 @@ const boolean debug = false;
 
 // In PPM pulses per second (Ppm range = 1200, so 100PPM = ~8.3% throttle, 5% thrott per sec is equal to 60 ppm/sec)
 #define PPM_BRAKE_RATE 300
-#define PPM_ACCEL_RATE 130
+#define PPM_ACCEL_RATE 85
 #define PPM_JUMP_VALUE 110
 #define PPM_WITHIN_JUMP_RATE 500  // Pass through "dead zone" of throttle really quickly
 
@@ -95,7 +95,7 @@ VescUart VUART;
 
 // Radio
 RF24 radio(0, 1);
-const byte addresses[][6] = {"00003", "00004"};  // Read at addr 00003, write at addr 00004
+const byte addresses[][6] = {"00001", "00002"};  // Read at addr 00003, write at addr 00004
 float dataRx[3];                                 // Double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes (no dynamic payload)
 float dataTx[3];
 unsigned long lastHBTime = 0;  // Time when heartbeat signal was last recieved
@@ -209,7 +209,9 @@ void setup() {
 
     // Setup LEDs
     pinMode(FETONE_PIN, OUTPUT);     // Mosfet shit lmao
-    digitalWrite(FETONE_PIN, HIGH);  // Set both mosfet channel to be on
+    pinMode(FETTWO_PIN, OUTPUT); 
+    digitalWrite(FETONE_PIN, LOW);  // Set both mosfet channel to be on
+    digitalWrite(FETTWO_PIN, LOW);
     FastLED.addLeds<LED_TYPE, LED_DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS_BOARD).setCorrection(TypicalLEDStrip);
     FastLED.setBrightness(LED_BRIGHTNESS);
     FastLED.clear();
