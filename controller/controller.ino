@@ -44,7 +44,7 @@ const boolean debug = false;
 #define THROTT_ENABLE_BUTTON A2
 
 // Throttle stuff
-#define throttleDeadzone 8  // About 1.5% intrinsic deadzone, can be bigger on skateboard but want to minimize deadzone from controller side because it's harder to modify
+#define throttleDeadzone 5  // About 1.5% intrinsic deadzone, can be bigger on skateboard but want to minimize deadzone from controller side because it's harder to modify
 #define THROTTLE_MIN 0
 #define THROTTLE_MAX 255
 #define THROTTLE_STOP (THROTTLE_MIN + THROTTLE_MAX) / 2
@@ -166,7 +166,6 @@ typedef enum {
 // Vesc data
 struct VREALTIME {
     float speed;
-    float distanceTravelled;
     float inputVoltage;
     float battPercent;
 };
@@ -646,7 +645,7 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 prefix = F("SPEED: ");
                 suffix = F("MPH");
                 // value = vesc_values_realtime.speed;
-                value = 22;
+                value = vesc_values_realtime.speed;
                 decimals = 1;
                 
 

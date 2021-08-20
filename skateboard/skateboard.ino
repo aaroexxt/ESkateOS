@@ -234,12 +234,12 @@ void setup() {
     ADS.begin();
     ADS.setGain(0);
 
-    // if (VUART.getVescValues()) {
-    //     DEBUG_PRINT(F("VESC intialComm: ok"));
-    // } else {
-    //     displayErrorCode(true, 1, 0, 0);
-    //     DEBUG_PRINT(F("VESC initialComm: err"));
-    // }
+    if (VUART.getVescValues()) {
+        DEBUG_PRINT(F("VESC intialComm: ok"));
+    } else {
+        displayErrorCode(true, 1, 0, 0);
+        DEBUG_PRINT(F("VESC initialComm: err"));
+    }
 
     // Go to state 0; waiting for connection
     transitionState(0);
@@ -325,6 +325,7 @@ void loop() {
     if (millis() - prevVescMillis >= vescDelay) {
         prevVescMillis = millis();
         sendBattPercent();
+        sendSpeed();
     }
 
     if (millis() - prevLEDMillis >= LEDdelay) {
