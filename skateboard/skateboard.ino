@@ -430,6 +430,7 @@ void transitionState(int newState) {
         case 2:  // We are going into remote disconnect mode
             DEBUG_PRINT(F("We've lost connection to the remote"));
             ledState = LEDSTATE_DISCON;
+            turnSignalState = NOT_TURNING;
             writeBoardLEDSSolid(CRGB::Red);
             FastLED.show();
 
