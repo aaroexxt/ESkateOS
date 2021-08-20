@@ -467,7 +467,8 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 u8g2.drawStr(0, 13, "Waiting for");
                 u8g2.drawStr(0, 28, "connection...");
                 u8g2.setFont(u8g2_font_helvR10_tr);
-                u8g2.drawStr(0, 48, "Autoconnecting");
+                u8g2.drawStr(0, 48, "Autoconnect or");
+                u8g2.drawStr(0, 64, "click to unlock");
 
                 break;
             case DISPU_START:
@@ -484,9 +485,37 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 // TODO: Should display battery level % controller AND board, Speed in MPH, Signal in 5 bars, and battery voltage
                 // x and y are positions on OLED in pixels
 
-                // BATTERY LEVEL
+                
+                x = 88;
+                y = 9;
+
+                String suffix = F("%");
+                String prefix = F("C -");
+                float value = 90;
+                
+                // Display perfix
+                displayString = prefix;
+                displayString.toCharArray(displayBuffer, 4);
+                u8g2.setFont(u8g2_font_profont12_tr);
+                u8g2.drawStr(x - 22, y, displayBuffer);         
+
+                // Display suffix
+                displayString = suffix;
+                displayString.toCharArray(displayBuffer, 3);
+                u8g2.setFont(u8g2_font_profont12_tr);
+                u8g2.drawStr(x + 12, y, displayBuffer);
+
+                // Display numbers
+                displayString = value;
+                displayString.toCharArray(displayBuffer, 3);
+                u8g2.setFont(u8g2_font_profont12_tr);
+                u8g2.drawStr(x, y, displayBuffer);
+                
+
+                // Controller Battery Box
+
                 x = 108;
-                y = 4;
+                y = 0;
 
                 u8g2.drawFrame(x + 2, y, 18, 9);
                 u8g2.drawBox(x, y + 2, 2, 5);
@@ -498,25 +527,53 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                         u8g2.drawBox(x + 4 + (3 * i), y + 2, 2, 5);
                     }
                 }
+
+                x = 88;
+                y = 23;
+
+                suffix = F("%");
+                prefix = F("B -");
+                value = 90;
                 
+                // Display perfix
+                displayString = prefix;
+                displayString.toCharArray(displayBuffer, 5);
+                u8g2.setFont(u8g2_font_profont12_tr);
+                u8g2.drawStr(x - 22, y, displayBuffer);         
+
+                // Display suffix
+                displayString = suffix;
+                displayString.toCharArray(displayBuffer, 3);
+                u8g2.setFont(u8g2_font_profont12_tr);
+                u8g2.drawStr(x + 12, y, displayBuffer);    
+
+
+
+                // Display numbers
+                displayString = value;
+                displayString.toCharArray(displayBuffer, 3);
+                u8g2.setFont(u8g2_font_profont12_tr);
+                u8g2.drawStr(x, y, displayBuffer);
+
+                // Board Battery Box
                 x = 108;
-                y = 4;
-                
+                y = 14;
+
                 u8g2.drawFrame(x + 2, y, 18, 9);
                 u8g2.drawBox(x, y + 2, 2, 5);
 
+                
                 for (int i = 0; i < 5; i++) {
                     int p = round((100 / 5) * i);
                     if (p <= vesc_values_realtime.battPercent) {
                         u8g2.drawBox(x + 4 + (3 * i), y + 2, 2, 5);
                     }
                 }
-
 
                 // SIGNAL INDICATOR
 
                 x = 114;
-                y = 17;
+                y = 55;
 
                 if (connected == true) {
                     if (throttleEnabled) {
