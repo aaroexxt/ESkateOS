@@ -488,7 +488,7 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 
                 x = 88;
                 y = 9;
-
+ 
                 String suffix = F("%");
                 String prefix = F("C -");
                 float value = 90;
