@@ -58,8 +58,8 @@ const boolean debug = false;
 
 // In PPM pulses per second (Ppm range = 1200, so 100PPM = ~8.3% throttle, 5% thrott per sec is equal to 60 ppm/sec)
 #define PPM_BRAKE_RATE 300
-#define PPM_ACCEL_RATE 130
-#define PPM_JUMP_VALUE 110
+#define PPM_ACCEL_RATE 115
+#define PPM_JUMP_VALUE 100
 #define PPM_WITHIN_JUMP_RATE 500  // Pass through "dead zone" of throttle really quickly
 
 #define HALL_MIN 0

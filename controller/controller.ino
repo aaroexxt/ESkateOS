@@ -44,7 +44,7 @@ const boolean debug = false;
 #define THROTT_ENABLE_BUTTON A2
 
 // Throttle stuff
-#define throttleDeadzone 5  // About 1.5% intrinsic deadzone, can be bigger on skateboard but want to minimize deadzone from controller side because it's harder to modify
+#define throttleDeadzone 4  // About 1.5% intrinsic deadzone, can be bigger on skateboard but want to minimize deadzone from controller side because it's harder to modify
 #define THROTTLE_MIN 0
 #define THROTTLE_MAX 255
 #define THROTTLE_STOP (THROTTLE_MIN + THROTTLE_MAX) / 2
