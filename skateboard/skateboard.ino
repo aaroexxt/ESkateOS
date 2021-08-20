@@ -138,7 +138,8 @@ typedef enum {
     LEDSTATE_OFF = 0,
     LEDSTATE_INITCHASE = 1,
     LEDSTATE_RAINBOW = 2,
-    LEDSTATE_CHGTHROTT = 3
+    LEDSTATE_CHGTHROTT = 3,
+    LEDSTATE_DISCON = 4
 } LEDLIGHT_STATES;
 int ledState = LEDSTATE_INITCHASE;
 
@@ -428,6 +429,7 @@ void transitionState(int newState) {
             break;
         case 2:  // We are going into remote disconnect mode
             DEBUG_PRINT(F("We've lost connection to the remote"));
+            ledState = LEDSTATE_DISCON;
             writeBoardLEDSSolid(CRGB::Red);
             FastLED.show();
 
