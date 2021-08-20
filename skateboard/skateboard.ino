@@ -31,14 +31,14 @@ V3.0
 
 // vesc imports
 #include <ServoTimer2.h>  // controlling vesc speed
-#include <VescUart.h>
+#include "VescUart.h"
 
 #include "ADS1X15.h"
 
 // Definitions
 
 //Uncomment below to enable debug prints
-#define DEBUG
+//#define DEBUG
 
 #ifdef DEBUG
 #define DEBUG_PRINT(x) Serial.println(x)
@@ -58,14 +58,14 @@ const boolean debug = false;
 
 // In PPM pulses per second (Ppm range = 1200, so 100PPM = ~8.3% throttle, 5% thrott per sec is equal to 60 ppm/sec)
 #define PPM_BRAKE_RATE 300
-#define PPM_ACCEL_RATE 85
+#define PPM_ACCEL_RATE 65
 #define PPM_JUMP_VALUE 110
 #define PPM_WITHIN_JUMP_RATE 500  // Pass through "dead zone" of throttle really quickly
 
 #define HALL_MIN 0
 #define HALL_MAX 255
 #define HALL_STOP (HALL_MAX + HALL_MIN) / 2
-#define initialVESCDelay 5000
+#define initialVESCDelay 1000
 
 #define HBTimeoutMax 750  // Max time between signals before board cuts the motors in ms
 
@@ -113,7 +113,7 @@ unsigned long prevVescMillis = 0;
 int vescDelay = 100;
 
 ADS1015 ADS(0x48);
-const double ADC_RES_DIV_FACTOR_VBUS = 24.617595945;
+const double ADC_RES_DIV_FACTOR_VBUS = 161.89;
 
 boolean error = false;
 boolean throttleEnabled = false;
@@ -179,7 +179,6 @@ void setup() {
     }
 
     Serial.begin(115200);
-    Serial1.begin(115200);
     Serial.println(F("ESKATEINIT_setup begin."));
 
     // Setup ESC
@@ -229,16 +228,27 @@ void setup() {
     DEBUG_PRINT(F("ADS init OK"));
 
     // Setup VESC UART
-    //delay(initialVESCDelay);
     DEBUG_PRINT(F("bef vesc init"));
     VUART.setSerialPort(&Serial1);
+    Serial1.begin(115200);
     DEBUG_PRINT(F("aft vesc init"));
+    delay(initialVESCDelay);
 
-    if (VUART.getVescValues()) {
-        DEBUG_PRINT(F("VESC intialComm: ok"));
-    } else {
-        displayErrorCode(true, 1, 0, 1);
-        DEBUG_PRINT(F("VESC initialComm: err"));
+    uint8_t tries = 0;
+    while(1) {
+        if (VUART.getVescValues()) {
+            DEBUG_PRINT(F("VESC intialComm: ok"));
+            break;
+        } else {
+            DEBUG_PRINT(F("VESC initialComm: err"));
+            DEBUG_PRINT(millis());
+            tries++;
+        }
+        delay(250);
+
+        if (tries > 10) {
+            displayErrorCode(true, 1, 0, 1);
+        }
     }
 
     Serial.println(F("ESKATEINIT_setup end."));
@@ -583,7 +593,7 @@ double getBattPercent() {
     int16_t ads = ADS.readADC(0);
     float f = ADS.toVoltage(1);
 
-    double inpVoltage = (double)ads*ADC_RES_DIV_FACTOR_VBUS*(double)f;
+    double inpVoltage = min(VUART.data.inpVoltage, (double)ads*(double)f*ADC_RES_DIV_FACTOR_VBUS); //Take more conservative of the two estimates
     float voltageRounded;
 
     // Times 10 because 10 cells
