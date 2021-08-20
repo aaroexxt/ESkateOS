@@ -645,7 +645,7 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 prefix = F("SPEED: ");
                 suffix = F("MPH");
                 // value = vesc_values_realtime.speed;
-                value = 22;
+                value = vesc_values_realtime.speed;
                 decimals = 1;
                 
 

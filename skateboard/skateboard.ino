@@ -13,7 +13,7 @@ V3.0
 
 /**
  * Error codes
- * 100: Vesc setup error
+ * 101: Vesc setup error
  * 200: Radio setup error
  * 300: ADC setup error
  * 404: Display code error
@@ -38,7 +38,7 @@ V3.0
 // Definitions
 
 //Uncomment below to enable debug prints
-//#define DEBUG
+#define DEBUG
 
 #ifdef DEBUG
 #define DEBUG_PRINT(x) Serial.println(x)
@@ -125,10 +125,10 @@ int MASTER_STATE = 0;
 unsigned long prevLoopMillis = 0;
 
 // Physical Constants
-const int motorPoles = 7;
-const int motorPulley = 14;  // Inches
-const int wheelPulley = 36;  // Inches
-const double gearRatio = (double)motorPulley / (double)wheelPulley;
+const double motorPolePairs = 7;
+const int motorPulley = 15;  
+const int wheelPulley = 40;  
+const double gearRatio = (double)wheelPulley / (double)motorPulley;
 const double wheelDiameter = 3.54331;  // Inches
 const double VBATT_MIN_CELL = 3.2;          // Voltage
 const double VBATT_MAX_CELL = 4.2;          // Voltage
@@ -173,14 +173,13 @@ typedef enum {
 // Functions
 
 void setup() {
-    // TODO: Check if hardware getting voltage
-
     // Don't move on until serial
     while (!Serial) {
         ;
     }
 
     Serial.begin(115200);
+    Serial1.begin(115200);
     Serial.println(F("ESKATEINIT_setup begin."));
 
     // Setup ESC
@@ -225,21 +224,22 @@ void setup() {
 
     DEBUG_PRINT(F("Setup leds: ok"));
 
-    // Setup VESC UART
-    delay(initialVESCDelay);
-    DEBUG_PRINT(F("bef vesc init"));
-    VUART.setSerialPort(&Serial);
-    DEBUG_PRINT(F("aft vesc init"));
-
     ADS.begin();
     ADS.setGain(0);
+    DEBUG_PRINT(F("ADS init OK"));
 
-    // if (VUART.getVescValues()) {
-    //     DEBUG_PRINT(F("VESC intialComm: ok"));
-    // } else {
-    //     displayErrorCode(true, 1, 0, 0);
-    //     DEBUG_PRINT(F("VESC initialComm: err"));
-    // }
+    // Setup VESC UART
+    //delay(initialVESCDelay);
+    DEBUG_PRINT(F("bef vesc init"));
+    VUART.setSerialPort(&Serial1);
+    DEBUG_PRINT(F("aft vesc init"));
+
+    if (VUART.getVescValues()) {
+        DEBUG_PRINT(F("VESC intialComm: ok"));
+    } else {
+        displayErrorCode(true, 1, 0, 1);
+        DEBUG_PRINT(F("VESC initialComm: err"));
+    }
 
     Serial.println(F("ESKATEINIT_setup end."));
     // Go to state 0; waiting for connection
@@ -327,6 +327,7 @@ void loop() {
     if (millis() - prevVescMillis >= vescDelay) {
         prevVescMillis = millis();
         sendBattPercent();
+        sendSpeed();
     }
 
     if (millis() - prevLEDMillis >= LEDdelay) {
@@ -433,14 +434,8 @@ void transitionState(int newState) {
             DEBUG_PRINT(F("We've lost connection to the remote"));
             ledState = LEDSTATE_DISCON;
             turnSignalState = NOT_TURNING;
-            ledState = 4;
-
             writeBoardLEDSSolid(CRGB::Red);
-            FastLED.show();
-
             realRAW = HALL_STOP;  // Set target to 0 speed to bring us back down to 0 speed
-            // DO NOT set realPPM to ESC_STOP, because this would instantly drop power to 0, meaning I could get thrown off the board
-
             break;
     }
 }
@@ -577,7 +572,7 @@ void resetDataTx() {
 
 double getSpeed() {
     if (VUART.getVescValues()) {
-        return (((double)VUART.data.tachometerAbs / motorPoles) * wheelDiameter) / (gearRatio * 336);
+        return (((double)VUART.data.rpm / motorPolePairs) * wheelDiameter) / (gearRatio * 336);
     } else {
         DEBUG_PRINT(F("Vesc data get fail"));
         return -1.0;
