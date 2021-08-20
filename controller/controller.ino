@@ -44,7 +44,7 @@ const boolean debug = false;
 #define THROTT_ENABLE_BUTTON A2
 
 // Throttle stuff
-#define throttleDeadzone 4  // About 1.5% intrinsic deadzone, can be bigger on skateboard but want to minimize deadzone from controller side because it's harder to modify
+#define throttleDeadzone 8  // About 1.5% intrinsic deadzone, can be bigger on skateboard but want to minimize deadzone from controller side because it's harder to modify
 #define THROTTLE_MIN 0
 #define THROTTLE_MAX 255
 #define THROTTLE_STOP (THROTTLE_MIN + THROTTLE_MAX) / 2
@@ -57,13 +57,13 @@ const boolean debug = false;
 #define SCREEN_HEIGHT 64  // OLED display height, in pixels
 
 // Heartbeat
-#define HBInterval 125           // Send a heartbeat every 125ms, 8x per second
-#define radioResendInterval 250  // Send all radio commands every 250ms, ~4x per second
-#define HBTimeoutMax 750         // Max time between signals before board cuts the motors in ms
+#define HBInterval 200          // Send a heartbeat every 125ms, 8x per second
+#define radioResendInterval 125  // Send all radio commands every 250ms, ~4x per second
+#define HBTimeoutMax 1000         // Max time between signals before board cuts the motors in ms
 
 // Misc
 #define displayStateOneChangeTime 4000
-#define debounceDelay 300
+#define debounceDelay 250
 
 // Hardware declaration
 
@@ -445,6 +445,16 @@ void sendAllRadioCommands() {  // Sends all commands to board
     radio.write(&dataTx, sizeof(dataTx));
 
     resetDataTx();
+    dataTx[0] = LEDMODE;
+    dataTx[1] = ledMode;
+    radio.write(&dataTx, sizeof(dataTx));
+    
+    resetDataTx();
+    dataTx[0] = TURNSIGNAL;
+    dataTx[1] = turnSignalMode;
+    radio.write(&dataTx, sizeof(dataTx));
+
+    resetDataTx();
     dataTx[0] = THROTTLE_SW;  // Throttle switch update
     dataTx[1] = (throttleEnabled) ? 1 : 0;
     radio.write(&dataTx, sizeof(dataTx));
@@ -488,7 +498,6 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 u8g2.drawStr(5, 50, "V2.0");
                 break;
             case DISPU_FULL:
-                // TODO: Should display battery level % controller AND board, Speed in MPH, Signal in 5 bars, and battery voltage
                 // x and y are positions on OLED in pixels
 
                 x = 82;
@@ -497,6 +506,8 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 String suffix = F("%");
                 String prefix = F("C -");
                 int value;
+                int decimals;
+                int first, last;
 
                 float avgBatt = 0;
                 for (byte i = 0; i < 50; i++) {
@@ -626,6 +637,38 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                         u8g2.drawVLine(x + 46 - i, y + 2, 7);
                     }
                 }
+
+                // VESC DATA INDICATOR
+
+                x = 0;
+                y = 52;
+
+                prefix = F("SPEED: ");
+                suffix = F("MPH");
+                // value = vesc_values_realtime.speed;
+                value = 22;
+                decimals = 1;
+                
+
+                // Display prefix (title)
+                displayString = prefix;
+                displayString.toCharArray(displayBuffer, 15);
+                u8g2.setFont(u8g2_font_profont22_tf);
+                u8g2.drawStr(x, y, displayBuffer);
+
+                // Display numbers
+                displayString = value;
+                displayString.toCharArray(displayBuffer, 5);
+                u8g2.setFont(u8g2_font_profont22_tf);
+                u8g2.drawStr(x + 76, y, displayBuffer);
+
+                // Display suffix
+                displayString = suffix;
+                displayString.toCharArray(displayBuffer, 5);
+                u8g2.setFont(u8g2_font_profont17_tr);
+                u8g2.drawStr(x + 102, y, displayBuffer);
+
+                y += 25;
         }
     } while (u8g2.nextPage());
 }
