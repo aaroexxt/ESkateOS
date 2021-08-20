@@ -79,7 +79,7 @@ int dispMinUpdate = 20;  // Minimum time between display updates in ms to make s
 int prevThrottle = THROTTLE_STOP;
 int throttle = THROTTLE_STOP;
 const double VBATT_MIN = 3.2;  // Voltage
-const double VBATT_MAX = 4.4;  // Voltage
+const double VBATT_MAX = 4.2;  // Voltage
 float voltageRounded;
 float battBuffer[50];
 unsigned long lastBattTime = 0;
