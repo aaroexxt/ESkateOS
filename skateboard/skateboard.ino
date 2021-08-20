@@ -259,10 +259,8 @@ void setup() {
 void loop() {
     radioRecieveMode();
     if (radio.available()) {
-        Serial.println("RAD RECV");
         resetDataRx();
         radio.read(&dataRx, sizeof(dataRx));
-        Serial.println(dataRx[0]);
 
         switch (MASTER_STATE) {
             // Waiting for first hb signal from controller
@@ -582,7 +580,8 @@ void resetDataTx() {
 
 double getSpeed() {
     if (VUART.getVescValues()) {
-        return (((double)VUART.data.rpm / motorPolePairs) * wheelDiameter) / (gearRatio * 336);
+        double mph = (((double)VUART.data.rpm / (double)motorPolePairs) * (double)wheelDiameter) / ((double)gearRatio * 336.0);
+        return mph;
     } else {
         DEBUG_PRINT(F("Vesc data get fail"));
         return -1.0;

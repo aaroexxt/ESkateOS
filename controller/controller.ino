@@ -642,30 +642,44 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 x = 0;
                 y = 52;
 
-                prefix = F("SPEED: ");
+                prefix = F("SPEED");
                 suffix = F("MPH");
-                // value = vesc_values_realtime.speed;
-                value = vesc_values_realtime.speed;
-                decimals = 1;
-                
+                float fvalue = vesc_values_realtime.speed;
+                decimals = 2;
 
                 // Display prefix (title)
                 displayString = prefix;
-                displayString.toCharArray(displayBuffer, 15);
-                u8g2.setFont(u8g2_font_profont22_tf);
+                displayString.toCharArray(displayBuffer, 10);
+                u8g2.setFont(u8g2_font_profont12_tr);
                 u8g2.drawStr(x, y, displayBuffer);
 
+                // Split up the float value: a number, b decimals.
+                first = abs(floor(fvalue));
+                last = fvalue * pow(10, 3) - first * pow(10, 3);
+
+                // Add leading zero
+                if (first <= 9) {
+                    displayString = "0" + (String)first;
+                } else {
+                    displayString = (String)first;
+                }
+
                 // Display numbers
-                displayString = value;
-                displayString.toCharArray(displayBuffer, 5);
-                u8g2.setFont(u8g2_font_profont22_tf);
-                u8g2.drawStr(x + 76, y, displayBuffer);
+                displayString.toCharArray(displayBuffer, 10);
+                u8g2.setFont(u8g2_font_logisoso32_tn);
+                u8g2.drawStr(x + 32, y + 10, displayBuffer);
+
+                // Display decimals
+                displayString = "." + (String)last;
+                displayString.toCharArray(displayBuffer, decimals + 2);
+                u8g2.setFont(u8g2_font_profont22_tr);
+                u8g2.drawStr(x + 73, y - 5, displayBuffer);
 
                 // Display suffix
                 displayString = suffix;
-                displayString.toCharArray(displayBuffer, 5);
-                u8g2.setFont(u8g2_font_profont17_tr);
-                u8g2.drawStr(x + 102, y, displayBuffer);
+                displayString.toCharArray(displayBuffer, 10);
+                u8g2.setFont(u8g2_font_profont22_tr);
+                u8g2.drawStr(x + 73 + 2, y + 13, displayBuffer);
 
                 y += 25;
         }
