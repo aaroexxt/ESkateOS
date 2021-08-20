@@ -467,19 +467,18 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 u8g2.drawStr(0, 13, "Waiting for");
                 u8g2.drawStr(0, 28, "connection...");
                 u8g2.setFont(u8g2_font_helvR10_tr);
-                u8g2.drawStr(0, 48, "Autoconnect or");
-                u8g2.drawStr(0, 64, "click to unlock");
+                u8g2.drawStr(0, 48, "Autoconnecting");
 
                 break;
             case DISPU_START:
                 u8g2.setFont(u8g2_font_helvR10_tr);
                 u8g2.drawXBM(4, 4, 24, 24, logo_bits);
                 u8g2.drawStr(34, 22, "EskateOS V2");
-                u8g2.drawStr(5, 50, "By Aaron Becker");
+                u8g2.drawStr(5, 50, "By Aaron Becker & Ilan Rosenbaum");
                 break;
             case DISPU_VERSION:
                 u8g2.setFont(u8g2_font_logisoso22_tn);
-                u8g2.drawStr(5, 50, "V6.0");
+                u8g2.drawStr(5, 50, "V2.0");
                 break;
             case DISPU_FULL:
                 // TODO: Should display battery level % controller AND board, Speed in MPH, Signal in 5 bars, and battery voltage
@@ -492,12 +491,27 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 u8g2.drawFrame(x + 2, y, 18, 9);
                 u8g2.drawBox(x, y + 2, 2, 5);
 
+                
                 for (int i = 0; i < 5; i++) {
                     int p = round((100 / 5) * i);
                     if (p <= vesc_values_realtime.battPercent) {
                         u8g2.drawBox(x + 4 + (3 * i), y + 2, 2, 5);
                     }
                 }
+                
+                x = 108;
+                y = 4;
+                
+                u8g2.drawFrame(x + 2, y, 18, 9);
+                u8g2.drawBox(x, y + 2, 2, 5);
+
+                for (int i = 0; i < 5; i++) {
+                    int p = round((100 / 5) * i);
+                    if (p <= vesc_values_realtime.battPercent) {
+                        u8g2.drawBox(x + 4 + (3 * i), y + 2, 2, 5);
+                    }
+                }
+
 
                 // SIGNAL INDICATOR
 
@@ -513,28 +527,6 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 } else {
                     u8g2.drawXBM(x, y, 12, 12, signal_noconnection_bits);
                 }
-
-                // ENABLED INDICATOR
-
-                x = 110;
-                y = 40;
-
-                u8g2.setFont(u8g2_font_profont12_tr);
-                if (throttleEnabled) {
-                    u8g2.drawStr(x, y, "T:E");
-                } else {
-                    u8g2.drawStr(x, y, "T:D");
-                }
-
-                // LED MODE INDICATOR
-
-                x = 110;
-                y = 60;
-                u8g2.setFont(u8g2_font_profont12_tr);
-                displayString = "L:";
-                displayString += String(ledMode);
-                displayString.toCharArray(displayBuffer, 4);
-                u8g2.drawStr(x, y, displayBuffer);
 
                 // THROTTLE INDICATOR
 
@@ -561,70 +553,6 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                     }
                 }
 
-                // VESC DATA INDICATOR
-
-                x = 0;
-                y = 26;
-                String prefix;
-                String suffix;
-                float value;
-                int decimals;
-                int first, last;
-
-                for (int i = 0; i < 2; i++) {
-                    switch (i) {
-                        case 0:  // >--- Speed
-                            prefix = F("SPEED");
-                            suffix = F("MPH");
-                            value = vesc_values_realtime.speed;
-                            decimals = 1;
-                            break;
-                        case 1:  // >--- Distance
-                            prefix = F("BATTV");
-                            suffix = F("V");
-                            value = vesc_values_realtime.inputVoltage;
-                            decimals = 1;
-
-                            break;
-                    }
-
-                    // Display prefix (title)
-                    displayString = prefix;
-                    displayString.toCharArray(displayBuffer, 10);
-                    u8g2.setFont(u8g2_font_profont12_tr);
-                    u8g2.drawStr(x, y - 1, displayBuffer);
-
-                    // Split up the float value: a number, b decimals.
-                    first = abs(floor(value));
-                    last = value * pow(10, 3) - first * pow(10, 3);
-
-                    // Add leading zero
-                    if (first <= 9) {
-                        displayString = "0" + (String)first;
-                    } else {
-                        displayString = (String)first;
-                    }
-
-                    // Display numbers
-                    displayString.toCharArray(displayBuffer, 10);
-                    u8g2.setFont(u8g2_font_logisoso22_tn);
-                    u8g2.drawStr(x + 55, y + 13, displayBuffer);
-
-                    // Display decimals
-                    displayString = "." + (String)last;
-                    displayString.toCharArray(displayBuffer, decimals + 2);
-                    u8g2.setFont(u8g2_font_profont12_tr);
-                    u8g2.drawStr(x + 86, y - 1, displayBuffer);
-
-                    // Display suffix
-                    displayString = suffix;
-                    displayString.toCharArray(displayBuffer, 10);
-                    u8g2.setFont(u8g2_font_profont12_tr);
-                    u8g2.drawStr(x + 86 + 2, y + 13, displayBuffer);
-
-                    y += 25;
-                }
-                break;
         }
     } while (u8g2.nextPage());
 }
