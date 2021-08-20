@@ -16,6 +16,7 @@ V3.0
  * 100: Vesc setup error
  * 200: Radio setup error
  * 300: ADC setup error
+ * 404: Display code error
 */
 
 #include <Wire.h>
@@ -29,9 +30,10 @@ V3.0
 #include <RF24.h>
 
 // vesc imports
-#include <ServoTimer2.h>                       // controlling vesc speed
-#include <SparkFun_ADS1015_Arduino_Library.h>  // library adafuit for reading adc data
+#include <ServoTimer2.h>  // controlling vesc speed
 #include <VescUart.h>
+
+#include "ADS1X15.h"
 
 // Definitions
 
@@ -61,7 +63,7 @@ const boolean debug = false;
 #define PPM_WITHIN_JUMP_RATE 500  // Pass through "dead zone" of throttle really quickly
 
 #define HALL_MIN 0
-#define HALL_MAX 255  // TODO: fix this, Real is 220
+#define HALL_MAX 255
 #define HALL_STOP (HALL_MAX + HALL_MIN) / 2
 #define initialVESCDelay 5000
 
@@ -93,7 +95,7 @@ VescUart VUART;
 
 // Radio
 RF24 radio(0, 1);
-const byte addresses[][6] = {"00003", "00004"};  // Read at addr 00001, write at addr 00002
+const byte addresses[][6] = {"00003", "00004"};  // Read at addr 00003, write at addr 00004
 float dataRx[3];                                 // Double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes (no dynamic payload)
 float dataTx[3];
 unsigned long lastHBTime = 0;  // Time when heartbeat signal was last recieved
@@ -110,6 +112,9 @@ int mappedVal;
 unsigned long prevVescMillis = 0;
 int vescDelay = 100;
 
+ADS1015 ADS(0x48);
+const double ADC_RES_DIV_FACTOR_VBUS = 24.617595945;
+
 boolean error = false;
 boolean throttleEnabled = false;
 
@@ -120,14 +125,13 @@ int MASTER_STATE = 0;
 unsigned long prevLoopMillis = 0;
 
 // Physical Constants
-// TODO: set these variables, should be imperial units (we want MPH) delete this comment when complete
 const int motorPoles = 7;
 const int motorPulley = 14;  // Inches
 const int wheelPulley = 36;  // Inches
 const double gearRatio = (double)motorPulley / (double)wheelPulley;
 const double wheelDiameter = 3.54331;  // Inches
-const double VBATT_MIN = 3.2;          // Voltage
-const double VBATT_MAX = 4.4;          // Voltage
+const double VBATT_MIN_CELL = 3.2;          // Voltage
+const double VBATT_MAX_CELL = 4.2;          // Voltage
 
 // Enums
 typedef enum {
@@ -220,28 +224,27 @@ void setup() {
 
     DEBUG_PRINT(F("Setup leds: ok"));
 
-    //    // Setup VESC UART
-    //    delay(initialVESCDelay);
-    //    DEBUG_PRINT(F("bef vesc init"));
-    //    VUART.setSerialPort(&Serial);
-    //    DEBUG_PRINT(F("aft vesc init"));
+    // Setup VESC UART
+    delay(initialVESCDelay);
+    DEBUG_PRINT(F("bef vesc init"));
+    VUART.setSerialPort(&Serial);
+    DEBUG_PRINT(F("aft vesc init"));
 
-    //    if (VUART.getVescValues()) {
-    //        DEBUG_PRINT(F("VESC intialComm: ok"));
-    //    } else {
-    //        displayErrorCode(true, 1, 0, 0);
-    //        DEBUG_PRINT(F("VESC initialComm: err"));
-    //    }
+    ADS.begin();
+    ADS.setGain(0);
+
+    // if (VUART.getVescValues()) {
+    //     DEBUG_PRINT(F("VESC intialComm: ok"));
+    // } else {
+    //     displayErrorCode(true, 1, 0, 0);
+    //     DEBUG_PRINT(F("VESC initialComm: err"));
+    // }
 
     // Go to state 0; waiting for connection
     transitionState(0);
 }
 
 void loop() {
-    //    if (currentMillis - prevVescMillis >= vescDelay && !error) {
-    //        prevVescMillis = currentMillis;
-    //        sendVESCData();
-    //    }
     radioRecieveMode();
     if (radio.available()) {
         Serial.println("RAD RECV");
@@ -316,6 +319,11 @@ void loop() {
     // Have we lost connection with the controller while operating normally? welp then we should prolly cut motors
     if (millis() - lastHBTime >= HBTimeoutMax && MASTER_STATE == 1) {
         transitionState(2);
+    }
+
+    if (millis() - prevVescMillis >= vescDelay) {
+        prevVescMillis = millis();
+        sendBattPercent();
     }
 
     if (millis() - prevLEDMillis >= LEDdelay) {
@@ -399,7 +407,6 @@ void loop() {
     FastLED.show();
 
     // # TODO: Add calc speed code to main loop
-
     updateESC();  // Update ESC with throttle value
 
     radioRecieveMode();  // Set radio back to recieve mode at end of loop
@@ -427,7 +434,6 @@ void transitionState(int newState) {
             realRAW = HALL_STOP;  // Set target to 0 speed to bring us back down to 0 speed
             // DO NOT set realPPM to ESC_STOP, because this would instantly drop power to 0, meaning I could get thrown off the board
 
-            ledState = LEDSTATE_INITCHASE;  // Go back into disconnected mode
             break;
     }
 }
@@ -487,7 +493,7 @@ void updateESC() {
     // Write the actual value out
     ESC.write(realPPM);
 
-    delay(10);  // 10ms delay
+    delay(35);
 }
 
 void displayErrorCode(boolean hang, int e1, int e2, int e3) {
@@ -506,20 +512,17 @@ void displayErrorCode(boolean hang, int e1, int e2, int e3) {
         leds[10] = CRGB::Red;
         leds[11] = CRGB::Red;
     }
-    if (e1 < NUM_LEDS_BOARD) {
-        for (int i = 0; i < e1; i++) {
-            leds[i] = CRGB::Red;
-        }
+
+    for (int i = 0; i < e1; i++) {
+        leds[i] = CRGB::Red;
     }
-    if (e1 + e2 + 1 < NUM_LEDS_BOARD) {
-        for (int i = e1 + 1; i < e1 + e2 + 1; i++) {
-            leds[i] = CRGB::Red;
-        }
+
+    for (int i = e1 + 1; i < e1 + e2 + 1; i++) {
+        leds[i] = CRGB::Red;
     }
-    if (e1 + e2 + e3 + 2 < NUM_LEDS_BOARD) {
-        for (int i = e2 + 2; i < e1 + e2 + e3 + 2; i++) {
-            leds[i] = CRGB::Red;
-        }
+
+    for (int i = e1 + e2 + 2; i < e1 + e2 + e3 + 2; i++) {
+        leds[i] = CRGB::Red;
     }
 
     for (int i = e1 + e2 + e3 + 2; i < NUM_LEDS_BOARD; i++) {
@@ -575,18 +578,24 @@ double getSpeed() {
 }
 
 double getBattPercent() {
-    if (VUART.getVescValues()) {
-        float inpVoltage = (float)VUART.data.inpVoltage;
-        float voltageRounded = ((inpVoltage < VBATT_MIN) ? VBATT_MIN : (inpVoltage > VBATT_MAX) ? VBATT_MAX
-                                                                                                : inpVoltage);
-        return mapFloat(voltageRounded, VBATT_MIN, VBATT_MAX, 0, 100);
+    int16_t ads = ADS.readADC(0);
+    float f = ADS.toVoltage(1);
+
+    double inpVoltage = (double)ads*ADC_RES_DIV_FACTOR_VBUS*(double)f;
+    float voltageRounded;
+
+    // Times 10 because 10 cells
+    if (inpVoltage < VBATT_MIN_CELL * 10) {
+        voltageRounded = VBATT_MIN_CELL * 10;
+    } else if (inpVoltage > VBATT_MAX_CELL * 10) {
+        voltageRounded = VBATT_MAX_CELL * 10;
     } else {
-        DEBUG_PRINT(F("Vesc data get fail"));
-        return -1.0;
+        voltageRounded = inpVoltage;
     }
+    return floor(mapFloat(voltageRounded, VBATT_MIN_CELL * 10, VBATT_MAX_CELL * 10, 0, 100));
 }
 
-void sendVESCData() {
+void sendSpeed() {
     radioTransmitMode();
     resetDataTx();
     // ID 12: VESC data [id, value]. ID 0 is speed, ID 1 is battery percent
@@ -594,8 +603,12 @@ void sendVESCData() {
     dataTx[1] = 0;
     dataTx[2] = getSpeed();
     radio.write(&dataTx, sizeof(dataTx));
+}
 
+void sendBattPercent() {
+    radioTransmitMode();
     resetDataTx();
+    // ID 12: VESC data [id, value]. ID 0 is speed, ID 1 is battery percent
     dataTx[0] = VESCDATA;
     dataTx[1] = 1;
     dataTx[2] = getBattPercent();
