@@ -229,7 +229,7 @@ void setup() {
     DEBUG_PRINT(F("ADS init OK"));
 
     // Setup VESC UART
-    //delay(initialVESCDelay);
+    delay(initialVESCDelay);
     DEBUG_PRINT(F("bef vesc init"));
     VUART.setSerialPort(&Serial1);
     DEBUG_PRINT(F("aft vesc init"));
