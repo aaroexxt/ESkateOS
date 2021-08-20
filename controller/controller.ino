@@ -597,21 +597,6 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                     }
                 }
 
-                // SIGNAL INDICATOR
-
-                x = 114;
-                y = 55;
-
-                if (connected == true) {
-                    if (throttleEnabled) {
-                        u8g2.drawXBM(x, y, 12, 12, signal_transmitting_bits);
-                    } else {
-                        u8g2.drawXBM(x, y, 12, 12, signal_connected_bits);
-                    }
-                } else {
-                    u8g2.drawXBM(x, y, 12, 12, signal_noconnection_bits);
-                }
-
                 // THROTTLE INDICATOR
 
                 x = 0;
