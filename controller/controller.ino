@@ -78,6 +78,12 @@ int turnSignalMode = 0;
 int dispMinUpdate = 20;  // Minimum time between display updates in ms to make sure we don't update faster than what the screen can handle
 int prevThrottle = THROTTLE_STOP;
 int throttle = THROTTLE_STOP;
+const double VBATT_MIN = 3.2;  // Voltage
+const double VBATT_MAX = 4.4;  // Voltage
+float voltageRounded;
+float battBuffer[50];
+unsigned long lastBattTime = 0;
+byte battBufferPos = 0;
 
 float dataRx[3];
 float dataTx[3];
@@ -127,7 +133,7 @@ const unsigned char signal_noconnection_bits[] = {
 
 char displayBuffer[20];
 
-const byte addresses[][6] = {"00003", "00004"};  // Write at addr 00001, read at addr 00002
+const byte addresses[][6] = {"00003", "00004"};  // Write at addr 00003, read at addr 00004
 
 String displayString;
 typedef enum {
@@ -246,7 +252,7 @@ void loop() {
             case SENDALLDATA:
                 sendAllRadioCommands();
                 break;
-            case VESCDATA:  // ID 0 is speed, ID 1 is distance travelled, ID 2 is input voltage, ID 3 is batt percent
+            case VESCDATA:  // ID 0 is speed, ID 1 batt percent
                 switch ((int)dataRx[1]) {
                     case 0:
                         vesc_values_realtime.speed = dataRx[2];
@@ -261,16 +267,6 @@ void loop() {
             case TONE:
                 asynchTone(dataRx[1], dataRx[2]);  // Tone, time
                 break;
-        }
-        if (vvNew && displayVESCData) {
-            DEBUG_PRINT(F("New VESC data recieved\nSpeed: "));
-            DEBUG_PRINT(String(vesc_values_realtime.speed));
-            DEBUG_PRINT(F("Distance travelled: "));
-            DEBUG_PRINT(String(vesc_values_realtime.distanceTravelled));
-            DEBUG_PRINT(F("Input voltage: "));
-            DEBUG_PRINT(String(vesc_values_realtime.inputVoltage));
-            DEBUG_PRINT(F("Batt percent: "));
-            DEBUG_PRINT(String(vesc_values_realtime.battPercent));
         }
     }
     // Check/update throttle state, since that should happen no matter what because of safety
@@ -414,6 +410,16 @@ void loop() {
         prevDispUpdateMillis = millis();
         updateDisplay(DISPU_FULL);
     }
+
+    // Batt voltage
+    if (millis() - lastBattTime > 10) {
+        float battVoltage = analogRead(A0) * (3.3 / 1023.0) * 2.0;
+        battBuffer[battBufferPos] = battVoltage;
+        battBufferPos++;
+        if (battBufferPos > 49) battBufferPos = 0;
+
+        lastBattTime = millis();
+    }
     radioRecieveMode();  // Default to recieve mode so as to not drop transmissions
 }
 
@@ -485,32 +491,45 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 // TODO: Should display battery level % controller AND board, Speed in MPH, Signal in 5 bars, and battery voltage
                 // x and y are positions on OLED in pixels
 
-                
-                x = 88;
+                x = 82;
                 y = 9;
- 
+
                 String suffix = F("%");
                 String prefix = F("C -");
-                float value = 90;
-                
+                int value;
+
+                float avgBatt = 0;
+                for (byte i = 0; i < 50; i++) {
+                    avgBatt += battBuffer[i];
+                }
+                avgBatt /= 50.0;
+
+                if (avgBatt < VBATT_MIN) {
+                    voltageRounded = VBATT_MIN;
+                } else if (avgBatt > VBATT_MAX) {
+                    voltageRounded = VBATT_MAX;
+                } else {
+                    voltageRounded = avgBatt;
+                }
+                value = (int)floor(mapFloat(voltageRounded, VBATT_MIN, VBATT_MAX, 0, 100));
+
                 // Display perfix
                 displayString = prefix;
-                displayString.toCharArray(displayBuffer, 4);
+                displayString.toCharArray(displayBuffer, 5);
                 u8g2.setFont(u8g2_font_profont12_tr);
-                u8g2.drawStr(x - 22, y, displayBuffer);         
+                u8g2.drawStr(x - 28, y, displayBuffer);
 
                 // Display suffix
                 displayString = suffix;
                 displayString.toCharArray(displayBuffer, 3);
                 u8g2.setFont(u8g2_font_profont12_tr);
-                u8g2.drawStr(x + 12, y, displayBuffer);
+                u8g2.drawStr(x + 14, y, displayBuffer);
 
                 // Display numbers
                 displayString = value;
-                displayString.toCharArray(displayBuffer, 3);
+                displayString.toCharArray(displayBuffer, 4);
                 u8g2.setFont(u8g2_font_profont12_tr);
-                u8g2.drawStr(x, y, displayBuffer);
-                
+                u8g2.drawStr(x - 4, y, displayBuffer);
 
                 // Controller Battery Box
 
@@ -520,40 +539,39 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 u8g2.drawFrame(x + 2, y, 18, 9);
                 u8g2.drawBox(x, y + 2, 2, 5);
 
-                
                 for (int i = 0; i < 5; i++) {
                     int p = round((100 / 5) * i);
-                    if (p <= vesc_values_realtime.battPercent) {
+                    if (p <= value) {
                         u8g2.drawBox(x + 4 + (3 * i), y + 2, 2, 5);
                     }
                 }
 
-                x = 88;
+                // Board Battery
+
+                x = 82;
                 y = 23;
 
                 suffix = F("%");
                 prefix = F("B -");
-                value = 90;
-                
+                value = vesc_values_realtime.battPercent;
+
                 // Display perfix
                 displayString = prefix;
                 displayString.toCharArray(displayBuffer, 5);
                 u8g2.setFont(u8g2_font_profont12_tr);
-                u8g2.drawStr(x - 22, y, displayBuffer);         
+                u8g2.drawStr(x - 28, y, displayBuffer);
 
                 // Display suffix
                 displayString = suffix;
                 displayString.toCharArray(displayBuffer, 3);
                 u8g2.setFont(u8g2_font_profont12_tr);
-                u8g2.drawStr(x + 12, y, displayBuffer);    
-
-
+                u8g2.drawStr(x + 14, y, displayBuffer);
 
                 // Display numbers
                 displayString = value;
-                displayString.toCharArray(displayBuffer, 3);
+                displayString.toCharArray(displayBuffer, 4);
                 u8g2.setFont(u8g2_font_profont12_tr);
-                u8g2.drawStr(x, y, displayBuffer);
+                u8g2.drawStr(x - 4, y, displayBuffer);
 
                 // Board Battery Box
                 x = 108;
@@ -562,10 +580,9 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 u8g2.drawFrame(x + 2, y, 18, 9);
                 u8g2.drawBox(x, y + 2, 2, 5);
 
-                
                 for (int i = 0; i < 5; i++) {
                     int p = round((100 / 5) * i);
-                    if (p <= vesc_values_realtime.battPercent) {
+                    if (p <= value) {
                         u8g2.drawBox(x + 4 + (3 * i), y + 2, 2, 5);
                     }
                 }
@@ -591,14 +608,14 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 y = 0;
 
                 // Draw throttle
-                u8g2.drawHLine(x, y, 52);
+                u8g2.drawHLine(x, y, 48);
                 u8g2.drawVLine(x, y, 10);
-                u8g2.drawVLine(x + 52, y, 10);
+                u8g2.drawVLine(x + 48, y, 10);
                 u8g2.drawHLine(x, y + 10, 5);
-                u8g2.drawHLine(x + 52 - 4, y + 10, 5);
+                u8g2.drawHLine(x + 48 - 4, y + 10, 5);
 
                 if (throttle >= 127) {
-                    int width = map(throttle, 127, 255, 0, 49);
+                    int width = map(throttle, 127, 255, 0, 45);
 
                     for (int i = 0; i < width; i++) {
                         u8g2.drawVLine(x + i + 2, y + 2, 7);
@@ -606,10 +623,9 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 } else {
                     int width = map(throttle, 0, 126, 49, 0);
                     for (int i = 0; i < width; i++) {
-                        u8g2.drawVLine(x + 50 - i, y + 2, 7);
+                        u8g2.drawVLine(x + 46 - i, y + 2, 7);
                     }
                 }
-
         }
     } while (u8g2.nextPage());
 }
@@ -644,4 +660,8 @@ void resetDataTx() {
 void hang() {
     while (true) {
     };
+}
+
+float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
+    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }

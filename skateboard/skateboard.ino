@@ -16,6 +16,7 @@ V3.0
  * 100: Vesc setup error
  * 200: Radio setup error
  * 300: ADC setup error
+ * 404: Display code error
 */
 
 #include <Wire.h>
@@ -93,7 +94,7 @@ VescUart VUART;
 
 // Radio
 RF24 radio(0, 1);
-const byte addresses[][6] = {"00003", "00004"};  // Read at addr 00001, write at addr 00002
+const byte addresses[][6] = {"00003", "00004"};  // Read at addr 00003, write at addr 00004
 float dataRx[3];                                 // Double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes (no dynamic payload)
 float dataTx[3];
 unsigned long lastHBTime = 0;  // Time when heartbeat signal was last recieved
@@ -220,28 +221,24 @@ void setup() {
 
     DEBUG_PRINT(F("Setup leds: ok"));
 
-    //    // Setup VESC UART
-    //    delay(initialVESCDelay);
-    //    DEBUG_PRINT(F("bef vesc init"));
-    //    VUART.setSerialPort(&Serial);
-    //    DEBUG_PRINT(F("aft vesc init"));
+    // Setup VESC UART
+    delay(initialVESCDelay);
+    DEBUG_PRINT(F("bef vesc init"));
+    VUART.setSerialPort(&Serial);
+    DEBUG_PRINT(F("aft vesc init"));
 
-    //    if (VUART.getVescValues()) {
-    //        DEBUG_PRINT(F("VESC intialComm: ok"));
-    //    } else {
-    //        displayErrorCode(true, 1, 0, 0);
-    //        DEBUG_PRINT(F("VESC initialComm: err"));
-    //    }
+    if (VUART.getVescValues()) {
+        DEBUG_PRINT(F("VESC intialComm: ok"));
+    } else {
+        displayErrorCode(true, 1, 0, 0);
+        DEBUG_PRINT(F("VESC initialComm: err"));
+    }
 
     // Go to state 0; waiting for connection
     transitionState(0);
 }
 
 void loop() {
-    //    if (currentMillis - prevVescMillis >= vescDelay && !error) {
-    //        prevVescMillis = currentMillis;
-    //        sendVESCData();
-    //    }
     radioRecieveMode();
     if (radio.available()) {
         Serial.println("RAD RECV");
@@ -316,6 +313,11 @@ void loop() {
     // Have we lost connection with the controller while operating normally? welp then we should prolly cut motors
     if (millis() - lastHBTime >= HBTimeoutMax && MASTER_STATE == 1) {
         transitionState(2);
+    }
+
+    if (millis() - prevVescMillis >= vescDelay) {
+        prevVescMillis = millis();
+        sendVESCData();
     }
 
     if (millis() - prevLEDMillis >= LEDdelay) {
@@ -506,21 +508,19 @@ void displayErrorCode(boolean hang, int e1, int e2, int e3) {
         leds[10] = CRGB::Red;
         leds[11] = CRGB::Red;
     }
-    if (e1 < NUM_LEDS_BOARD) {
-        for (int i = 0; i < e1; i++) {
-            leds[i] = CRGB::Red;
-        }
+
+    for (int i = 0; i < e1; i++) {
+        leds[i] = CRGB::Red;
     }
-    if (e1 + e2 + 1 < NUM_LEDS_BOARD) {
-        for (int i = e1 + 1; i < e1 + e2 + 1; i++) {
-            leds[i] = CRGB::Red;
-        }
+
+    for (int i = e1 + 1; i < e1 + e2 + 1; i++) {
+        leds[i] = CRGB::Red;
     }
-    if (e1 + e2 + e3 + 2 < NUM_LEDS_BOARD) {
-        for (int i = e2 + 2; i < e1 + e2 + e3 + 2; i++) {
-            leds[i] = CRGB::Red;
-        }
+    
+    for (int i = e1 + e2 + 2; i < e1 + e2 + e3 + 2; i++) {
+        leds[i] = CRGB::Red;
     }
+    
 
     for (int i = e1 + e2 + e3 + 2; i < NUM_LEDS_BOARD; i++) {
         leds[i] = CRGB::Black;
