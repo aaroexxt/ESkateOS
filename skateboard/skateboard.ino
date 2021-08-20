@@ -70,7 +70,7 @@ const boolean debug = false;
 #define HBTimeoutMax 750  // Max time between signals before board cuts the motors in ms
 
 // LEDs defs
-#define LED_DATA_PIN 14
+#define LED_DATA_PIN 3
 #define LED_TYPE WS2811
 #define COLOR_ORDER BRG  // I'm using a BRG led strip which is kinda wacky
 #define NUM_LEDS_BOARD 26
@@ -210,16 +210,14 @@ void setup() {
 
     // Setup LEDs
     pinMode(FETONE_PIN, OUTPUT);     // Mosfet shit lmao
-    pinMode(FETTWO_PIN, OUTPUT); 
-    digitalWrite(FETONE_PIN, LOW);  // Set both mosfet channel to be on
-    digitalWrite(FETTWO_PIN, LOW);
+    digitalWrite(FETONE_PIN, HIGH);  // Set both mosfet channel to be on
     FastLED.addLeds<LED_TYPE, LED_DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS_BOARD).setCorrection(TypicalLEDStrip);
     FastLED.setBrightness(LED_BRIGHTNESS);
     FastLED.clear();
 
-    // Setup speaker
+    // Setup headlight
     pinMode(FETTWO_PIN, OUTPUT);
-    digitalWrite(FETTWO_PIN, LOW);
+    digitalWrite(FETTWO_PIN, LOW); //Headlight off
 
     // Make sure we're displaying nothing
     writeBoardLEDSSolid(CRGB::Black);
@@ -243,6 +241,7 @@ void setup() {
     //     DEBUG_PRINT(F("VESC initialComm: err"));
     // }
 
+    Serial.println(F("ESKATEINIT_setup end."));
     // Go to state 0; waiting for connection
     transitionState(0);
 }
@@ -310,6 +309,7 @@ void loop() {
                     radio.write(&dataTx, sizeof(dataTx));
 
                     lastHBTime = millis();
+
                     transitionState(1);  // Go back to normal operation
                 }
                 break;
@@ -431,8 +431,12 @@ void transitionState(int newState) {
             break;
         case 2:  // We are going into remote disconnect mode
             DEBUG_PRINT(F("We've lost connection to the remote"));
+<<<<<<< Updated upstream
             ledState = LEDSTATE_DISCON;
             turnSignalState = NOT_TURNING;
+=======
+            ledState = 4;
+>>>>>>> Stashed changes
             writeBoardLEDSSolid(CRGB::Red);
             FastLED.show();
 
