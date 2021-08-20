@@ -95,7 +95,7 @@ VescUart VUART;
 
 // Radio
 RF24 radio(0, 1);
-const byte addresses[][6] = {"00001", "00002"};  // Read at addr 00003, write at addr 00004
+const byte addresses[][6] = {"00001", "00002"};  // Read at addr 00001, write at addr 00002
 float dataRx[3];                                 // Double takes up 8 bytes, each payload is 32 bytes, so this will use 24 of the 32 bytes (no dynamic payload)
 float dataTx[3];
 unsigned long lastHBTime = 0;  // Time when heartbeat signal was last recieved
@@ -138,7 +138,8 @@ typedef enum {
     LEDSTATE_OFF = 0,
     LEDSTATE_INITCHASE = 1,
     LEDSTATE_RAINBOW = 2,
-    LEDSTATE_CHGTHROTT = 3
+    LEDSTATE_CHGTHROTT = 3,
+    LEDSTATE_DISCON = 4
 } LEDLIGHT_STATES;
 int ledState = LEDSTATE_INITCHASE;
 
@@ -430,6 +431,8 @@ void transitionState(int newState) {
             break;
         case 2:  // We are going into remote disconnect mode
             DEBUG_PRINT(F("We've lost connection to the remote"));
+            ledState = LEDSTATE_DISCON;
+            turnSignalState = NOT_TURNING;
             writeBoardLEDSSolid(CRGB::Red);
             FastLED.show();
 
