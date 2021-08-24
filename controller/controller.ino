@@ -44,22 +44,21 @@ const boolean debug = false;
 #define THROTT_ENABLE_BUTTON A2
 
 // Throttle stuff
-#define throttleDeadzone 4  // About 1.5% intrinsic deadzone, can be bigger on skateboard but want to minimize deadzone from controller side because it's harder to modify
+#define throttleDeadzone 8  // About 1.5% intrinsic deadzone, can be bigger on skateboard but want to minimize deadzone from controller side because it's harder to modify
 #define THROTTLE_MIN 0
 #define THROTTLE_MAX 255
 #define THROTTLE_STOP (THROTTLE_MIN + THROTTLE_MAX) / 2
 #define HALL_MIN 266
 #define HALL_MAX 793
-#define HALL_CENTER (HALL_MIN + HALL_MAX) / 2
+#define HALL_CENTER ((HALL_MIN + HALL_MAX) / 2) + 30
 
 // Screen constants
 #define SCREEN_WIDTH 128  // OLED display width, in pixels
 #define SCREEN_HEIGHT 64  // OLED display height, in pixels
 
-// Heartbeat
-#define HBInterval 200          // Send a heartbeat every 125ms, 8x per second
-#define radioResendInterval 125  // Send all radio commands every 250ms, ~4x per second
-#define HBTimeoutMax 1000         // Max time between signals before board cuts the motors in ms
+// Radio Intervals
+#define radioResendInterval 250  // Send all radio commands every 250ms, ~4x per second
+#define HBTimeoutMax 1000        // Max time between signals before board cuts the motors in ms
 
 // Misc
 #define displayStateOneChangeTime 4000
@@ -79,7 +78,7 @@ int dispMinUpdate = 20;  // Minimum time between display updates in ms to make s
 int prevThrottle = THROTTLE_STOP;
 int throttle = THROTTLE_STOP;
 const double VBATT_MIN = 3.2;  // Voltage
-const double VBATT_MAX = 4.2;  // Voltage
+const double VBATT_MAX = 4.0;  // Voltage
 float voltageRounded;
 float battBuffer[50];
 unsigned long lastBattTime = 0;
@@ -344,13 +343,6 @@ void loop() {
                 updateDisplayFlag = true;  // Set display update flag for next timer cycle
                 DEBUG_PRINT(F("LEDChgState:"));
                 DEBUG_PRINT(ledMode);
-
-                // Now send the data since there's been an update
-                radioTransmitMode();
-                resetDataTx();
-                dataTx[0] = LEDMODE;  //led update
-                dataTx[1] = ledMode;
-                radio.write(&dataTx, sizeof(dataTx));
             }
 
             // Turn Signals
@@ -366,29 +358,14 @@ void loop() {
                 updateDisplayFlag = true;  // Set display update flag for next timer cycle
                 DEBUG_PRINT(F("LEDChgState to turn signal:"));
                 DEBUG_PRINT(turnSignalMode);
-
-                // Now send the data since there's been an update
-                radioTransmitMode();
-                resetDataTx();
-                dataTx[0] = TURNSIGNAL;
-                dataTx[1] = turnSignalMode;
-                radio.write(&dataTx, sizeof(dataTx));
-            }
-
-            if (millis() - prevRadioResendMillis >= radioResendInterval) {  // Check if we should send all radio commands
-                sendAllRadioCommands();                                     // Don't need to send second HB signal because it was already send in sendAllRadioCommands
-                prevHBMillis = millis();
-                prevRadioResendMillis = millis();
             }
             break;
     }
 
-    if (millis() - prevHBMillis >= HBInterval) {  // Every HBInterval ms send a new heartbeat to board (if it isn't already sent
-        radioTransmitMode();
-        resetDataTx();
-        dataTx[0] = HEARTBEAT;
-        radio.write(&dataTx, sizeof(dataTx));
+    if (millis() - prevRadioResendMillis >= radioResendInterval) {  // Check if we should send all radio commands
+        sendAllRadioCommands();                                     
         prevHBMillis = millis();
+        prevRadioResendMillis = millis();
     }
 
     if (toneActive && millis() > toneExpire) {
@@ -447,7 +424,7 @@ void sendAllRadioCommands() {  // Sends all commands to board
     dataTx[0] = LEDMODE;
     dataTx[1] = ledMode;
     radio.write(&dataTx, sizeof(dataTx));
-    
+
     resetDataTx();
     dataTx[0] = TURNSIGNAL;
     dataTx[1] = turnSignalMode;
@@ -625,32 +602,24 @@ void updateDisplay(DISPLAY_UPDATE_TYPES d) {  // A lot of help for this: https:/
                 // VESC DATA INDICATOR
 
                 x = 0;
-                y = 52;
+                y = 64;
 
-                prefix = F("SPEED: ");
                 suffix = F("MPH");
                 // value = vesc_values_realtime.speed;
                 value = vesc_values_realtime.speed;
                 decimals = 1;
-                
-
-                // Display prefix (title)
-                displayString = prefix;
-                displayString.toCharArray(displayBuffer, 15);
-                u8g2.setFont(u8g2_font_profont22_tf);
-                u8g2.drawStr(x, y, displayBuffer);
 
                 // Display numbers
                 displayString = value;
                 displayString.toCharArray(displayBuffer, 5);
-                u8g2.setFont(u8g2_font_profont22_tf);
-                u8g2.drawStr(x + 76, y, displayBuffer);
+                u8g2.setFont(u8g2_font_fub35_tf);
+                u8g2.drawStr(x +12, y, displayBuffer);
 
                 // Display suffix
                 displayString = suffix;
                 displayString.toCharArray(displayBuffer, 5);
-                u8g2.setFont(u8g2_font_profont17_tr);
-                u8g2.drawStr(x + 102, y, displayBuffer);
+                u8g2.setFont(u8g2_font_profont22_tr);
+                u8g2.drawStr(x + 75, y, displayBuffer);
 
                 y += 25;
         }

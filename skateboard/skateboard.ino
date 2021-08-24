@@ -58,7 +58,7 @@ const boolean debug = false;
 
 // In PPM pulses per second (Ppm range = 1200, so 100PPM = ~8.3% throttle, 5% thrott per sec is equal to 60 ppm/sec)
 #define PPM_BRAKE_RATE 300
-#define PPM_ACCEL_RATE 115
+#define PPM_ACCEL_RATE 100
 #define PPM_JUMP_VALUE 100
 #define PPM_WITHIN_JUMP_RATE 500  // Pass through "dead zone" of throttle really quickly
 
@@ -67,7 +67,7 @@ const boolean debug = false;
 #define HALL_STOP (HALL_MAX + HALL_MIN) / 2
 #define initialVESCDelay 5000
 
-#define HBTimeoutMax 750  // Max time between signals before board cuts the motors in ms
+#define HBTimeoutMax 1000  // Max time between signals before board cuts the motors in ms
 
 // LEDs defs
 #define LED_DATA_PIN 14
@@ -100,6 +100,7 @@ float dataRx[3];                                 // Double takes up 8 bytes, eac
 float dataTx[3];
 unsigned long lastHBTime = 0;  // Time when heartbeat signal was last recieved
 boolean radioListening = false;
+boolean sendHeartbeat = false;
 
 // LEDs
 CRGB leds[NUM_LEDS_BOARD];
@@ -126,12 +127,12 @@ unsigned long prevLoopMillis = 0;
 
 // Physical Constants
 const double motorPolePairs = 7;
-const int motorPulley = 15;  
-const int wheelPulley = 40;  
+const int motorPulley = 15;
+const int wheelPulley = 40;
 const double gearRatio = (double)wheelPulley / (double)motorPulley;
 const double wheelDiameter = 3.54331;  // Inches
-const double VBATT_MIN_CELL = 3.2;          // Voltage
-const double VBATT_MAX_CELL = 4.2;          // Voltage
+const double VBATT_MIN_CELL = 3.2;     // Voltage
+const double VBATT_MAX_CELL = 4.0;     // Voltage
 
 // Enums
 typedef enum {
@@ -259,11 +260,7 @@ void loop() {
                 if (dataRx[0] == HEARTBEAT) {  // 200 is "heartbeat" signal
                     DEBUG_PRINT(F("Got first heartbeat signal from controller; we're go"));
                     ledState = 0;  // Make sure LEDs are off
-
-                    radioTransmitMode();
-                    resetDataTx();
-                    dataTx[0] = HEARTBEAT;
-                    radio.write(&dataTx, sizeof(dataTx));  // Send one back
+                    sendHeartbeat = true;
 
                     delay(50);
                     dataTx[0] = TONE;
@@ -271,7 +268,6 @@ void loop() {
                     dataTx[2] = 200;                       // Time
                     radio.write(&dataTx, sizeof(dataTx));  // Send pitch command
 
-                    lastHBTime = millis();
                     transitionState(1);
                 }
                 break;
@@ -291,10 +287,7 @@ void loop() {
                         break;
                     case HEARTBEAT:
                         lastHBTime = millis();
-                        radioTransmitMode();
-                        resetDataTx();
-                        dataTx[0] = HEARTBEAT;
-                        radio.write(&dataTx, sizeof(dataTx));
+                        sendHeartbeat = true;
                         break;
                 }
             case 2:  // Lost connection case
@@ -317,9 +310,14 @@ void loop() {
         }
     }
 
-    // Have we lost connection with the controller while operating normally? welp then we should prolly cut motors
-    if (millis() - lastHBTime >= HBTimeoutMax && MASTER_STATE == 1) {
-        transitionState(2);
+    updateESC();  // Update ESC with throttle value
+
+    if (sendHeartbeat) {
+        radioTransmitMode();
+        resetDataTx();
+        dataTx[0] = HEARTBEAT;
+        radio.write(&dataTx, sizeof(dataTx));
+        radioRecieveMode();
     }
 
     if (millis() - prevVescMillis >= vescDelay) {
@@ -408,10 +406,9 @@ void loop() {
 
     FastLED.show();
 
-    // # TODO: Add calc speed code to main loop
-    updateESC();  // Update ESC with throttle value
-
-    radioRecieveMode();  // Set radio back to recieve mode at end of loop
+    if (millis() - lastHBTime >= HBTimeoutMax && MASTER_STATE == 1) {
+        transitionState(2);
+    }
 }
 
 void transitionState(int newState) {
@@ -585,7 +582,7 @@ double getBattPercent() {
     int16_t ads = ADS.readADC(0);
     float f = ADS.toVoltage(1);
 
-    double inpVoltage = (double)ads*ADC_RES_DIV_FACTOR_VBUS*(double)f;
+    double inpVoltage = (double)ads * ADC_RES_DIV_FACTOR_VBUS * (double)f;
     float voltageRounded;
 
     // Times 10 because 10 cells
