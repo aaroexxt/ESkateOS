@@ -429,16 +429,6 @@ void sendAllRadioCommands() {  // Sends all commands to board
     dataTx[0] = TURNSIGNAL;
     dataTx[1] = turnSignalMode;
     radio.write(&dataTx, sizeof(dataTx));
-
-    resetDataTx();
-    dataTx[0] = THROTTLE_SW;  // Throttle switch update
-    dataTx[1] = (throttleEnabled) ? 1 : 0;
-    radio.write(&dataTx, sizeof(dataTx));
-
-    resetDataTx();
-    dataTx[0] = THROTTLE_VAL;  // Throttle update
-    dataTx[1] = prevThrottle;
-    radio.write(&dataTx, sizeof(dataTx));
 }
 
 void asynchTone(int pitch, int time) {  // Time in ms
